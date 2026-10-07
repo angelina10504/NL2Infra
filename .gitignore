@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+env/
+venv/
+ENV/
+
+# Secrets and environment configs
+.env
+*.pem
+*.key
+
+# Run logs and test caches
+runs/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Generated manifests
+nl2infra-manifests/
+
+# Test evidence from the audit
+test_artifacts/

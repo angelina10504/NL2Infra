@@ -1,0 +1,20 @@
+You are a Kubernetes security engineer. The file below failed validation. Return a corrected version of this one file.
+
+File: {filename}
+```yaml
+{current_manifest}
+```
+
+Violations in this file (rule ID, tool, severity, line, message):
+{violations_text}
+{failed_attempt}
+The approved plan for this resource, which you must not change:
+{resource_json}
+
+Rules:
+1. Fix every violation listed.
+2. Keep exactly the kind, name, namespace, image and replica count from the approved plan. Do not change the image tag and do not add an image digest.
+3. The file must contain this one resource only. Do not add, rename or delete resources.
+4. Keep everything that is not part of a violation unchanged.
+
+Reply with the complete corrected YAML for this file and nothing else. No explanation.

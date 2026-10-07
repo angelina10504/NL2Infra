@@ -1,0 +1,16 @@
+# Checkov settings shared by the app (validators.py) and the manifests repo workflow.
+# Every skip here is deliberate and is copied into each run log.
+skip-check:
+  # CKV_K8S_43 "image should use a digest". The model cannot know a real digest, so
+  # this rule can only be "fixed" by inventing one. Image integrity is enforced
+  # instead by plan conformance (the image must equal the approved plan exactly),
+  # CKV_K8S_14 (fixed tag, never :latest) and CKV_K8S_15 (imagePullPolicy Always).
+  # A user who wants a digest writes it in the request; it is then part of the plan.
+  - CKV_K8S_43
+  # CKV2_K8S_6 "pods should have an associated NetworkPolicy". It can only clear by
+  # adding a NetworkPolicy, and a resource that is not in the approved plan is a
+  # plan-conformance violation. Forcing the planner to add one would change the
+  # benchmark tier sizes and fail arms A and B on every request for a structural
+  # reason. A NetworkPolicy the user asks for is planned and checked like any
+  # other resource.
+  - CKV2_K8S_6

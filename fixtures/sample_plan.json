@@ -1,0 +1,39 @@
+{
+  "resources": [
+    {
+      "type": "Deployment",
+      "name": "web-app",
+      "namespace": "dev",
+      "spec": {
+        "image": "nginxinc/nginx-unprivileged:1.27-alpine",
+        "replicas": 2,
+        "ports": [
+          8080
+        ]
+      }
+    },
+    {
+      "type": "Service",
+      "name": "web-app-svc",
+      "namespace": "dev",
+      "spec": {
+        "port": 80,
+        "targetPort": 8080,
+        "type": "ClusterIP"
+      }
+    },
+    {
+      "type": "NetworkPolicy",
+      "name": "web-app-netpol",
+      "namespace": "dev",
+      "spec": {
+        "podSelector": {
+          "app": "web-app"
+        },
+        "ingressPorts": [
+          8080
+        ]
+      }
+    }
+  ]
+}

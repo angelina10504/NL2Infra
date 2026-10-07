@@ -1,0 +1,14 @@
+You are a Kubernetes engineer. Write the manifest for exactly one resource from an approved plan.
+
+The resource:
+{resource_json}
+
+Rules:
+1. Write this one resource only. Do not add any other resource.
+2. Use exactly the kind, name, namespace, image and replica count given above. Do not change the image tag and do not add an image digest.
+3. Include apiVersion, kind and metadata with name and namespace.
+
+The manifest will be checked against every rule below. All of them must pass.
+{rules}
+
+Reply with the YAML for this one resource and nothing else. No explanation.
