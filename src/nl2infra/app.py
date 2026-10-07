@@ -67,7 +67,7 @@ table.nl-table td.st-fail { color:var(--red); font-family:'IBM Plex Mono', monos
 table.nl-table td.st-ok { font-family:'IBM Plex Mono', monospace; font-size:12px; text-transform:uppercase; letter-spacing:.08em; white-space:nowrap; }
 
 /* timeline */
-.nl-step { background:var(--panel); border:1px solid var(--line); padding:10px 12px; min-height:178px; position:relative; }
+.nl-step { background:var(--panel); border:1px solid var(--line); padding:10px 12px; position:relative; }
 .nl-step.sel { outline:2px solid var(--ink); outline-offset:-2px; }
 .nl-step.now { outline:2px dashed var(--ink); outline-offset:-2px; }
 .nl-step .lab { font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); }
@@ -82,11 +82,17 @@ table.nl-table td.st-ok { font-family:'IBM Plex Mono', monospace; font-size:12px
 .nl-step.bad .status, .nl-step .reason { color:var(--red); }
 .nl-step .reason { font-size:13px; margin-top:6px; word-break:break-word; }
 .nl-step .sub { font-size:13px; color:var(--muted); margin-top:6px; word-break:break-word; }
+.nl-step .sub.ink { color:var(--ink); }
+/* Result and stopped cards span a round card plus its View button, so the strip is one height. */
+.nl-step { height:192px; overflow:hidden; }
+.nl-step.tall { height:230px; overflow:auto; }
+.nl-strip .nl-step, .nl-strip .nl-step.tall { height:192px; }
+.nl-chart { height:230px; }
 .nl-strip { display:flex; gap:10px; }
 .nl-strip .nl-step { flex:1 1 0; min-width:0; }
 
 /* chart */
-.nl-chart { background:var(--panel); border:1px solid var(--line); padding:10px 12px; min-height:178px; }
+.nl-chart { background:var(--panel); border:1px solid var(--line); padding:10px 12px; }
 .nl-bars { display:flex; align-items:flex-end; gap:10px; height:104px; border-bottom:1px solid var(--ink); margin-top:6px; }
 .nl-bar { flex:1 1 0; display:flex; flex-direction:column; justify-content:flex-end; align-items:stretch; height:100%; }
 .nl-bar .n { font-family:'IBM Plex Mono', monospace; font-size:11px; text-align:center; }
@@ -100,7 +106,7 @@ table.nl-table td.st-ok { font-family:'IBM Plex Mono', monospace; font-size:12px
 table.nl-diff { width:100%; border-collapse:collapse; table-layout:fixed; font-family:'IBM Plex Mono', monospace; font-size:12.5px; line-height:1.5; }
 table.nl-diff th { position:sticky; top:0; background:#2A2A22; color:#B9B5AA; font-size:11px; letter-spacing:.14em; text-transform:uppercase; text-align:left; padding:7px 10px; font-weight:500; z-index:1; }
 table.nl-diff td { padding:0 8px; vertical-align:top; white-space:pre-wrap; word-break:break-all; font-family:'IBM Plex Mono', monospace; }
-table.nl-diff td.g { width:128px; color:var(--red-dark); font-size:10.5px; white-space:normal; word-break:normal; padding-left:10px; }
+table.nl-diff td.n.hit { color:var(--red-dark); font-weight:600; }
 table.nl-diff td.n { width:44px; color:#6D6A60; text-align:right; user-select:none; }
 table.nl-diff td.eq { color:#8D897D; }
 table.nl-diff td.rm { background:rgba(204,52,69,.30); color:var(--panel); box-shadow:inset 3px 0 0 var(--red-dark) !important; }
@@ -108,6 +114,15 @@ table.nl-diff td.ad { background:var(--line); color:var(--ink); }
 table.nl-diff td.vd { background:#1D1D16; }
 table.nl-diff td.mark { background:rgba(204,52,69,.14); }
 table.nl-diff td.sep { width:10px; background:#2A2A22; padding:0; }
+table.nl-diff td.skip { background:#2A2A22; color:#B9B5AA; text-align:center; font-size:11px; letter-spacing:.12em; text-transform:uppercase; padding:4px 0; }
+.nl-code.fixed { height:460px; max-height:460px; }
+.nl-fail { background:var(--panel); border:1px solid var(--red); border-left:4px solid var(--red); padding:8px 12px; margin-bottom:8px; font-size:13.5px; }
+.nl-fail .head { font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:.14em; text-transform:uppercase; color:var(--red); margin-bottom:4px; }
+.nl-fail b { font-family:'IBM Plex Mono', monospace; font-weight:600; color:var(--red); font-size:12.5px; }
+.nl-fail.ok { border-color:var(--line); border-left:4px solid var(--line); color:var(--muted); }
+.nl-request { background:var(--panel); border:1px solid var(--line); padding:12px 14px; font-size:16px; line-height:1.45; margin-bottom:10px; }
+[data-testid="stExpander"] details { background:var(--panel); border:1px solid var(--line); }
+[data-testid="stExpander"] summary p { font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink); }
 
 /* summary */
 .nl-summary { display:flex; background:var(--ink); color:var(--panel); margin-top:22px; }
@@ -178,7 +193,7 @@ def round_card(step: dict, selected: bool = False) -> str:
 
 
 def stage_card(step: dict) -> str:
-    return (f'<div class="nl-step bad"><div class="lab">{esc(step["label"])}</div>'
+    return (f'<div class="nl-step tall bad"><div class="lab">{esc(step["label"])}</div>'
             '<div class="status">Stopped</div><div class="reason">This step did not complete.</div></div>')
 
 
@@ -187,16 +202,16 @@ def end_card(step: dict, log: dict) -> str:
     if step["passed"]:
         rounds = log.get("iterations") or 0
         extra = f'<div class="sub">{"First draft, no fix needed" if rounds == 0 else f"After {rounds} fix round(s)"}</div>'
-        if log.get("pr_url"):
-            extra += f'<div class="sub">Pull request: {esc(log["pr_url"])}</div>'
-        elif log.get("pr_error"):
-            extra += f'<div class="sub">No pull request: {esc(log["pr_error"])[:160]}</div>'
+        headline, detail = ui.pull_request_note(log)
+        extra += f'<div class="sub ink">{esc(headline)}</div>'
+        if detail:
+            extra += f'<div class="sub">{esc(detail)[:200]}</div>'
     elif step["reason"]:
-        extra = f'<div class="reason">{esc(step["reason"])}</div>'
+        extra = f'<div class="reason">{esc(ui.plain_reason(step["reason"]))}</div>'
     elif not step["running"] and log.get("arm") in ("A", "B"):
         extra = f'<div class="reason">Arm {esc(log["arm"])}: one call, no fix loop. Violations remain.</div>'
     bad = not step["passed"] and not step["running"]
-    return (f'<div class="nl-step {"bad" if bad else ""} {"now" if step["running"] else ""}"><div class="lab">Result</div>'
+    return (f'<div class="nl-step tall {"bad" if bad else ""} {"now" if step["running"] else ""}"><div class="lab">Result</div>'
             f'<div class="status">{esc(step["label"])}</div>{extra}</div>')
 
 
@@ -223,35 +238,46 @@ def chart(rounds: list) -> str:
             f'<div class="nl-axis">{axis}</div><div class="nl-legend">{legend}</div></div>')
 
 
-def gutter(marks: dict, line) -> str:
+def line_cell(marks: dict, line) -> str:
+    """The line-number cell. A line a tool pointed at (never line 1) is shown in red, with the rules on hover."""
     rules = marks.get(line) or []
-    shown = " ".join(rules[:2]) + (f" +{len(rules) - 2}" if len(rules) > 2 else "")
-    return f'<td class="g" title="{esc(", ".join(rules))}">{esc(shown)}</td>'
+    if rules:
+        return f'<td class="n hit" title="{esc(", ".join(rules))}">{line}</td>'
+    return f'<td class="n">{line or ""}</td>'
 
 
 def diff_table(rows: list, marks: dict, left_title: str, right_title: str) -> str:
     body = ""
     for row in rows:
+        if row["tag"] == "skip":
+            body += f'<tr><td class="skip" colspan="5">&middot;&middot;&middot; {row["count"]} unchanged line{"" if row["count"] == 1 else "s"}</td></tr>'
+            continue
         left_class = {"equal": "eq", "removed": "rm", "changed": "rm", "added": "vd"}[row["tag"]]
         right_class = {"equal": "eq", "removed": "vd", "changed": "ad", "added": "ad"}[row["tag"]]
         if row["left_no"] in marks and left_class == "eq":
             left_class = "eq mark"
-        body += (f'<tr>{gutter(marks, row["left_no"])}<td class="n">{row["left_no"] or ""}</td>'
+        body += (f'<tr>{line_cell(marks, row["left_no"])}'
                  f'<td class="{left_class}">{esc(row["left"])}</td><td class="sep"></td>'
                  f'<td class="n">{row["right_no"] or ""}</td><td class="{right_class}">{esc(row["right"])}</td></tr>')
-    return ('<div class="nl-code"><table class="nl-diff"><tr><th style="width:128px">Rule</th><th style="width:44px"></th>'
+    return ('<div class="nl-code"><table class="nl-diff"><tr><th style="width:44px"></th>'
             f'<th>{esc(left_title)}</th><th style="width:10px"></th><th style="width:44px"></th><th>{esc(right_title)}</th></tr>'
             f'{body}</table></div>')
 
 
-def file_table(text: str, marks: dict, title: str, with_gutter: bool = True) -> str:
+def failure_strip(failures: list, draft: str) -> str:
+    """What the draft on the left failed, by rule. Checkov gives no useful line, so this is not in the gutter."""
+    if not failures:
+        return f'<div class="nl-fail ok">{esc(draft)} had no violations in this file.</div>'
+    items = "".join(f'<div><b>{esc(rule)}</b> &ndash; {esc(message)}</div>' for rule, message in failures)
+    return f'<div class="nl-fail"><div class="head">{esc(draft)} failed:</div>{items}</div>'
+
+
+def file_table(text: str, marks: dict, title: str) -> str:
     """One file, full width. Used when there is nothing to compare."""
     body = "".join(
-        f'<tr>{gutter(marks, number) if with_gutter else ""}<td class="n">{number}</td>'
-        f'<td class="{"mark" if number in marks else ""}">{esc(line)}</td></tr>'
+        f'<tr>{line_cell(marks, number)}<td class="{"mark" if number in marks else ""}">{esc(line)}</td></tr>'
         for number, line in enumerate(text.splitlines(), start=1))
-    rule_head = '<th style="width:128px">Rule</th>' if with_gutter else ""
-    return (f'<div class="nl-code"><table class="nl-diff"><tr>{rule_head}<th style="width:44px"></th>'
+    return (f'<div class="nl-code"><table class="nl-diff"><tr><th style="width:44px"></th>'
             f'<th>{esc(title)}</th></tr>{body}</table></div>')
 
 
@@ -264,9 +290,12 @@ def violations_table(rows: list) -> str:
         body += (f'<tr class="{"fixed" if fixed else ""}"><td class="{"st-ok" if fixed else "st-fail"}">{esc(row["status"])}</td>'
                  f'<td class="m">{esc(ui.TOOL_LABELS.get(row["tool"], row["tool"]))}</td><td class="m">{esc(row["rule_id"])}</td>'
                  f'<td class="m">{esc(row["severity"])}</td><td class="m">{esc(row.get("file") or "-")}</td>'
-                 f'<td class="m">{esc(row.get("line") or "-")}</td><td>{esc(row["message"])}</td></tr>')
+                 f'<td class="m">{esc(ui.where(row))}</td><td>{esc(row["message"])}</td></tr>')
+    # A real line number is shown as "line N"; line 1 or no line means the tool only named the resource.
+    where_head = "Line" if all(ui.has_real_line(row) for row in rows) else \
+        "Resource" if not any(ui.has_real_line(row) for row in rows) else "Line or resource"
     return ('<table class="nl-table"><tr><th>Status</th><th>Tool</th><th>Rule ID</th><th>Severity</th><th>File</th>'
-            f'<th>Line</th><th>Message</th></tr>{body}</table>')
+            f'<th>{where_head}</th><th>Message</th></tr>{body}</table>')
 
 
 def summary_strip(log: dict, log_path: str) -> str:
@@ -339,7 +368,7 @@ with st.container():
         else:
             with log_col:
                 show(f'<div class="nl-hval">No run logs in {esc(RUNS_DIR)}/</div>')
-    role = role_col.selectbox("Role", ROLES, key="role", disabled=mode == REPLAY)
+    role = role_col.selectbox("Role", ROLES, key="role") if mode == LIVE else None
 
 if mode == REPLAY:
     log_path = os.path.join(RUNS_DIR, replay_choice) if replay_choice else None
@@ -353,9 +382,11 @@ with model_slot:
         model_id = log.get("model_id") or log.get("model")
     else:
         model_id = "mock" if os.environ.get("MOCK_MODE", "false").lower() == "true" else os.environ.get("MODEL_NAME", "not set")
-    shown_role = (log.get("role") or log.get("user_role")) if log and mode == REPLAY else role
-    show(f'<div class="nl-brand-sub">Model</div><div class="nl-hval">{esc(model_id)}</div>'
-         + (f'<div class="nl-brand-sub" style="margin-top:6px">Run role: {esc(shown_role)}</div>' if mode == REPLAY and log else ""))
+    show(f'<div class="nl-brand-sub">Model</div><div class="nl-hval">{esc(model_id)}</div>')
+if mode == REPLAY:
+    with role_col:
+        saved_role = (log.get("role") or log.get("user_role")) if log else "-"
+        show(f'<div class="nl-brand-sub">Role (saved run)</div><div class="nl-hval">{esc(saved_role)}</div>')
 
 tab_run, tab_arms = st.tabs(["Run", "Compare arms"])
 
@@ -368,12 +399,14 @@ def render_request_and_plan():
     if finished:
         plan = log.get("approved_plan") or log.get("plan")
         prompt = log.get("prompt") or log.get("user_prompt") or ""
-        kinds = ", ".join(f'{r["type"]}/{r["name"]}' for r in plan["resources"]) if plan else "no plan"
-        state_word = "Plan approved" if log.get("approved_plan") else "No approved plan"
-        details = plan_table(plan) if plan else ""
-        show(f'<details class="nl-line"><summary><b>REQUEST</b> &nbsp;{esc(prompt)[:150]} &nbsp;&nbsp;<b>{esc(state_word).upper()}</b> &nbsp;{esc(kinds)}'
-             f' &nbsp;<span class="nl-note">(click for the plan)</span></summary><div style="margin-top:10px">'
-             f'<div class="nl-note" style="margin-bottom:8px">{esc(prompt)}</div>{details}</div></details>')
+        show(label("Request") + f'<div class="nl-request">{esc(prompt)}</div>')
+        if plan:
+            count = len(plan["resources"])
+            state_word = "Plan approved" if log.get("approved_plan") else "Plan not approved"
+            with st.expander(f"{state_word}: {count} resource{'' if count == 1 else 's'}"):
+                show(plan_table(plan))
+        else:
+            show('<div class="nl-panel nl-note">No plan was made for this request.</div>')
         if mode == LIVE and st.button("New request", key="new_request"):
             st.session_state.pop("live_id", None)
             st.rerun()
@@ -460,12 +493,13 @@ def render_diff(run_key: str, selected: int):
         show(f'<div class="nl-note" style="margin-bottom:8px">This run has only one draft. {verdict} The file is shown full width.</div>')
     elif single:
         show('<div class="nl-note" style="margin-bottom:8px">This is the first draft, so there is nothing before it to compare. '
-             'Rule IDs in the gutter mark the lines its violations point at. Select a fix round to see a diff.</div>')
+             'What it failed is listed above the file. Select a fix round to see a diff.</div>')
 
-    compare = "previous round"
-    pick_file, pick_compare = st.columns([3, 2])
+    compare, view = "previous round", "Full file"
+    pick_file, pick_compare, pick_view = st.columns([3, 2, 2])
     if not single:
         compare = pick_compare.radio("Compare", ["previous round", "first draft"], key=f"compare_{run_key}", horizontal=True)
+        view = pick_view.radio("View", ["Changes only", "Full file"], key=f"view_mode_{run_key}", horizontal=True)
     before = rounds[0] if compare == "first draft" else rounds[selected - 1] if not single else after
     changed = [] if single else ui.changed_files(before["files"], after["files"])
     names = list(after["files"])
@@ -475,23 +509,26 @@ def render_diff(run_key: str, selected: int):
     shown = {(f"{name}  (changed)" if name in changed else name): name for name in names}
     filename = shown[pick_file.radio(
         "File", list(shown), key=f"file_{run_key}_{selected}_{compare}", horizontal=True,
-        index=names.index(changed[0]) if changed and changed[0] in names else 0,
+        index=names.index(ui.default_file(names, before["violations"], changed)),
     )]
 
     marks = ui.gutter_marks(before["violations"], filename)
-    no_line = ui.unplaced_rules(before["violations"], filename)
+    show(failure_strip(ui.file_failures(before["violations"], filename), ui.round_label(before["round"])))
     if single:
         show(file_table(after["files"][filename], marks, f"{ui.round_label(selected)} · {filename}"))
+        return
+    rows = ui.diff_rows(before["files"].get(filename, ""), after["files"][filename])
+    removed, added = ui.diff_stats(rows)
+    if removed == added == 0:
+        show(f'<div class="nl-note" style="margin-bottom:6px">{esc(filename)} did not change in this comparison.'
+             + (' Switch to Full file to read it.' if view == "Changes only" else '') + '</div>')
+        if view == "Changes only":
+            return
     else:
-        rows = ui.diff_rows(before["files"].get(filename, ""), after["files"][filename])
-        removed, added = ui.diff_stats(rows)
-        if removed == added == 0:
-            show(f'<div class="nl-note" style="margin-bottom:6px">{esc(filename)} did not change in this comparison.</div>')
-        else:
-            show(f'<div class="nl-note mono" style="margin-bottom:6px">{removed} line(s) removed or replaced, {added} line(s) added.</div>')
-        show(diff_table(rows, marks, f"Before · {ui.round_label(before['round'])}", f"After · {ui.round_label(selected)}"))
-    if no_line:
-        show(f'<div class="nl-note" style="margin-top:6px">Violations on this file with no line number: {esc(", ".join(no_line))}</div>')
+        show(f'<div class="nl-note mono" style="margin-bottom:6px">{removed} line(s) removed or replaced, {added} line(s) added.</div>')
+    if view == "Changes only":
+        rows = ui.compact_rows(rows, context=3)
+    show(diff_table(rows, marks, f"Before · {ui.round_label(before['round'])}", f"After · {ui.round_label(selected)}"))
 
 
 with tab_run:
@@ -541,27 +578,87 @@ with tab_arms:
         chosen = pick_request.selectbox("Request", list(requests), key="arms_request")
         logs = {arm: ui.load_log(path) for arm, path in requests.get(chosen, {}).items()}
         any_log = next((entry for entry in logs.values() if entry), None)
+        request_id, problems = ui.arm_consistency(chosen, logs)
+        if problems:
+            # Never show one request's text beside another request's results.
+            show('<div class="nl-fail"><div class="head">These logs do not belong to one request</div>'
+                 + "".join(f"<div>{esc(problem)}</div>" for problem in problems) + '</div>')
+            st.stop()
         if any_log:
-            show(f'<div class="nl-line"><b>REQUEST</b> &nbsp;{esc(any_log.get("prompt"))} &nbsp;&nbsp;<b>ROLE</b> &nbsp;{esc(any_log.get("role"))}'
+            show(f'<div class="nl-line"><b>REQUEST {esc(request_id)}</b> &nbsp;{esc(any_log.get("prompt"))} &nbsp;&nbsp;<b>ROLE</b> &nbsp;{esc(any_log.get("role"))}'
                  f' &nbsp;&nbsp;<b>MODEL</b> &nbsp;{esc(any_log.get("model_id"))}</div>')
             show('<div class="nl-note" style="margin:8px 0 12px 0">Pass = 0 violations from Checkov, OPA and server dry-run on the final '
                  'files. Plan conformance is counted separately. Read-only, from the saved logs.</div>')
         names = {"A": "A · plain call", "B": "B · rules in prompt", "C": "C · full pipeline"}
+        verdicts = {arm: ui.arm_verdict(logs.get(arm)) for arm in "ABC"}
+
+        def verdict_word(verdict: dict) -> str:
+            if not verdict["available"]:
+                return "No saved run"
+            if verdict["outcome"] not in ("scored", "no_output"):
+                return "No result"
+            return "Pass" if verdict["passed"] else "Fail"
+
+        summary_rows = ""
+        for arm in "ABC":
+            v = verdicts[arm]
+            scored = v["available"] and v["outcome"] in ("scored", "no_output")
+            cells = [v["violations"], v["conformance_violations"], v["fix_rounds"],
+                     f'{v["tokens"]:,}' if v.get("tokens") is not None else "-",
+                     f'{v["runtime"]:.1f} s' if v.get("runtime") is not None else "-"] if scored else ["-"] * 5
+            word = verdict_word(v)
+            summary_rows += (f'<tr><td class="m">{esc(names[arm])}</td>'
+                             f'<td class="{"st-ok" if word == "Pass" else "st-fail"}">{esc(word)}</td>'
+                             + "".join(f'<td class="m">{esc(c)}</td>' for c in cells) + '</tr>')
+        show('<table class="nl-table" style="margin-bottom:6px"><tr><th>Arm</th><th>Verdict</th><th>Violations</th><th>Off-plan</th>'
+             f'<th>Fix rounds</th><th>Tokens</th><th>Runtime</th></tr>{summary_rows}</table>')
+        show('<div class="nl-note" style="margin-bottom:14px">Off-plan: resources or values that differ from the shared reference plan. '
+             'Tokens and runtime exclude the shared planning call.</div>')
+
         for column, arm in zip(st.columns(3), "ABC"):
             with column:
-                verdict = ui.arm_verdict(logs.get(arm))
+                verdict = verdicts[arm]
+                word = verdict_word(verdict)
                 if not verdict["available"]:
                     show(f'<div class="nl-arm">{label(names[arm])}<div class="nl-note">No saved run for this arm.</div></div>')
                     continue
-                if verdict["outcome"] not in ("scored", "no_output"):
-                    show(f'<div class="nl-arm">{label(names[arm])}<div class="verdict bad">No result</div>'
-                         f'<div class="nl-note nl-red">{esc(verdict["outcome"])}: {esc(logs[arm].get("rejection_reason"))}</div></div>')
+                if word == "No result":
+                    show(f'<div class="nl-arm">{label(names[arm])}<div class="verdict bad">No result</div><div class="nl-note nl-red">'
+                         f'{esc(verdict["outcome"])}: {esc(ui.plain_reason(logs[arm].get("rejection_reason")))}</div></div>')
                     continue
                 show(f'<div class="nl-arm">{label(names[arm])}'
-                     f'<div class="verdict {"" if verdict["passed"] else "bad"}">{"Pass" if verdict["passed"] else "Fail"}</div>'
+                     f'<div class="verdict {"" if verdict["passed"] else "bad"}">{word}</div>'
                      f'<div class="mono" style="font-size:13px">{verdict["violations"]} violation(s) · '
                      f'{verdict["conformance_violations"]} off-plan · {verdict["fix_rounds"]} fix round(s)</div></div>')
-                if not verdict["files"]:
-                    show('<div class="nl-panel nl-note">The model produced no usable files.</div>')
-                for filename, text in verdict["files"].items():
-                    show(f'<div class="nl-file">{esc(filename)}</div>' + file_table(text, {}, "Final file", with_gutter=False))
+
+                def violation_rows(items: list) -> str:
+                    return "".join(
+                        f'<tr><td class="m nl-red">{esc(v["rule_id"])}</td><td class="m">{esc(ui.TOOL_LABELS.get(v["tool"], v["tool"]))}</td>'
+                        f'<td>{esc(v["message"])}</td></tr>' for v in items)
+
+                found = verdict["violation_list"]
+                head = '<tr><th>Rule ID</th><th>Tool</th><th>Message</th></tr>'
+                if found:
+                    show(f'<table class="nl-table">{head}{violation_rows(found[:5])}</table>')
+                    if len(found) > 5:
+                        with st.expander(f"Show all {len(found)}"):
+                            show(f'<table class="nl-table">{head}{violation_rows(found)}</table>')
+                else:
+                    show('<div class="nl-panel nl-note">No violations from Checkov, OPA or dry-run.</div>')
+                if verdict["off_plan_list"]:
+                    listed = "".join(f'<tr><td class="m">{esc(v["rule_id"])}</td><td>{esc(ui.difference_only(v["message"]))}</td></tr>'
+                                     for v in verdict["off_plan_list"])
+                    show(f'<div class="nl-file">Off-plan ({len(verdict["off_plan_list"])})</div>'
+                         f'<table class="nl-table"><tr><th>Check</th><th>Difference from the plan</th></tr>{listed}</table>'
+                         '<div class="nl-note" style="margin-top:6px">Arms A and B never see the plan, so a different resource name '
+                         'counts as off-plan. Off-plan does not affect pass or fail.</div>')
+
+                with st.expander("Show final files"):
+                    if not verdict["files"]:
+                        show('<div class="nl-panel nl-note">The model produced no usable files.</div>')
+                    else:
+                        # One panel per arm, all the same height; each file is a titled block inside it.
+                        tables = "".join(
+                            file_table(text, {}, filename).replace('<div class="nl-code">', "", 1)[:-len("</div>")]
+                            for filename, text in verdict["files"].items())
+                        show(f'<div class="nl-code fixed">{tables}</div>')

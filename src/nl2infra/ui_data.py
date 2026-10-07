@@ -48,6 +48,31 @@ def benchmark_folders(runs_dir: str) -> List[str]:
     return sorted(folders)
 
 
+def arm_consistency(label: str, logs: Dict[str, Optional[dict]]) -> Tuple[Optional[str], List[str]]:
+    """Checks that the dropdown label and every arm's log are about one benchmark request.
+
+    Returns (request id, problems). The id comes from the label ('<id> (repeat n)');
+    each log must carry that id and repeat in its `benchmark` block, and all logs
+    must hold the same prompt. Any problem means the panel must not be shown.
+    """
+    match = re.match(r"(.+) \(repeat (\d+)\)$", label or "")
+    if not match:
+        return None, [f"'{label}' is not a benchmark request label"]
+    request_id, repeat = match.group(1), int(match.group(2))
+    problems, prompts = [], set()
+    for arm, log in sorted(logs.items()):
+        if not log:
+            continue
+        bench = log.get("benchmark") or {}
+        if bench.get("id") != request_id or bench.get("repeat") != repeat or bench.get("arm", arm) != arm:
+            problems.append(f"arm {arm} log is for {bench.get('id')} repeat {bench.get('repeat')} arm {bench.get('arm')}, "
+                            f"not {request_id} repeat {repeat} arm {arm}")
+        prompts.add(log.get("prompt") or log.get("user_prompt"))
+    if len(prompts) > 1:
+        problems.append("the arm logs hold different request texts")
+    return request_id, problems
+
+
 def benchmark_requests(folder: str) -> Dict[str, Dict[str, str]]:
     """'<id> (repeat n)' -> {arm: path} for one benchmark folder."""
     requests: Dict[str, Dict[str, str]] = {}
@@ -137,20 +162,46 @@ def changed_files(before: Dict[str, str], after: Dict[str, str]) -> List[str]:
     return [name for name in after if before.get(name) != after[name]] + [name for name in before if name not in after]
 
 
+def has_real_line(v: dict) -> bool:
+    """True if the tool pointed at a specific line. Line 1 is only where the resource starts (Checkov reports
+    that for every violation), so it says nothing about where the problem is."""
+    return isinstance(v.get("line"), int) and v["line"] > 1
+
+
 def gutter_marks(violations: List[dict], filename: str) -> Dict[int, List[str]]:
-    """line number -> rule IDs of the violations that point at that line of the file."""
+    """line number -> rule IDs, for violations that point at a real line of the file (greater than 1)."""
     marks: Dict[int, List[str]] = {}
     for v in violations:
-        if v.get("file") == filename and v.get("line"):
-            rules = marks.setdefault(int(v["line"]), [])
+        if v.get("file") == filename and has_real_line(v):
+            rules = marks.setdefault(v["line"], [])
             if v["rule_id"] not in rules:
                 rules.append(v["rule_id"])
     return marks
 
 
-def unplaced_rules(violations: List[dict], filename: str) -> List[str]:
-    """Rule IDs for this file that carry no line number, so they cannot be shown in the gutter."""
-    return sorted({v["rule_id"] for v in violations if v.get("file") == filename and not v.get("line")})
+def default_file(names: List[str], violations: List[dict], changed: List[str]) -> str:
+    """The file to open first: the first one with violations, else the first that changed, else the first."""
+    failing = {v.get("file") for v in violations}
+    for candidates in (failing, set(changed)):
+        for name in names:
+            if name in candidates:
+                return name
+    return names[0]
+
+
+def file_failures(violations: List[dict], filename: str) -> List[Tuple[str, str]]:
+    """(rule ID, message) for every violation on this file, once each, for the strip above the diff."""
+    seen, failures = set(), []
+    for v in violations:
+        if v.get("file") == filename and v["rule_id"] not in seen:
+            seen.add(v["rule_id"])
+            failures.append((v["rule_id"], v.get("message") or ""))
+    return failures
+
+
+def where(v: dict) -> str:
+    """'line N' when the tool gave a real line, otherwise the resource the violation is about."""
+    return f"line {v['line']}" if has_real_line(v) else (v.get("resource") or "-")
 
 
 # ------------------------------------------------------------------ diff
@@ -179,6 +230,31 @@ def diff_rows(before: str, after: str) -> List[dict]:
     return rows
 
 
+def compact_rows(rows: List[dict], context: int = 3) -> List[dict]:
+    """Only the changed hunks, with `context` unchanged lines either side.
+
+    Runs of hidden lines become one row {"tag": "skip", "count": n}. The kept rows
+    are the same objects, so their line numbers stay those of the full files.
+    """
+    changed = [i for i, row in enumerate(rows) if row["tag"] != "equal"]
+    keep = set()
+    for i in changed:
+        keep.update(range(max(0, i - context), min(len(rows), i + context + 1)))
+    compact: List[dict] = []
+    hidden = 0
+    for i, row in enumerate(rows):
+        if i in keep:
+            if hidden:
+                compact.append({"tag": "skip", "count": hidden})
+                hidden = 0
+            compact.append(row)
+        else:
+            hidden += 1
+    if hidden:
+        compact.append({"tag": "skip", "count": hidden})
+    return compact
+
+
 def diff_stats(rows: List[dict]) -> Tuple[int, int]:
     """(lines removed, lines added)."""
     removed = sum(1 for r in rows if r["tag"] in ("removed", "changed"))
@@ -186,20 +262,65 @@ def diff_stats(rows: List[dict]) -> Tuple[int, int]:
     return removed, added
 
 
+# ------------------------------------------------------------------ plain wording
+
+def plain_reason(text: Optional[str]) -> str:
+    """A reason without Python exception names, e.g. 'RuntimeError: disk full' -> 'disk full'."""
+    cleaned = re.sub(r"\b[A-Z][A-Za-z]*(?:Error|Exception|Timeout|Warning)\b:?\s*", "", text or "")
+    return re.sub(r"\s{2,}", " ", cleaned).strip()
+
+
+_FIXER_INSTRUCTIONS = (
+    r"\s*Remove it; do not add resources\.",
+    r"\s*Use exactly the planned image string\..*$",
+    r";\s*keep one definition\.",
+)
+
+
+def difference_only(message: Optional[str]) -> str:
+    """A plan-conformance message without the instruction to the fixer: only what differs."""
+    text = message or ""
+    for pattern in _FIXER_INSTRUCTIONS:
+        text = re.sub(pattern, "", text)
+    text = text.strip()
+    return text if text.endswith(".") or not text else text + "."
+
+
+def pull_request_note(log: dict) -> Tuple[str, str]:
+    """(headline, muted detail) for the pull-request line of a passed run."""
+    if log.get("pr_url"):
+        return f"Pull request: {log['pr_url']}", ""
+    error = log.get("pr_error") or ""
+    if "benchmark" in error.lower() or log.get("benchmark"):
+        return "Pull request not opened: benchmark run", ""
+    if error.startswith("file://") or "GITHUB_TOKEN" in error:
+        return "Pull request not opened: no GitHub token", ""
+    return "Pull request not opened", plain_reason(error)
+
+
 # ------------------------------------------------------------------ benchmark arms
 
 def arm_verdict(log: Optional[dict]) -> dict:
-    """Pass/fail and counts for one arm, from the benchmark summary written by run_benchmark.py."""
+    """Pass/fail, counts and the violation lists for one arm, from the benchmark log written by run_benchmark.py."""
     if not log:
         return {"available": False}
-    final = (log.get("summary") or {}).get("final") or {}
+    summary = log.get("summary") or {}
+    final = summary.get("final") or {}
     rounds = log.get("rounds") or []
+    last = rounds[-1]["violations"] if rounds else []
+    malformed = ("YAML_SYNTAX_ERROR", "PLAN_CONFORMANCE_INVALID_DOC")
     return {
         "available": True,
-        "outcome": (log.get("summary") or {}).get("outcome"),
+        "outcome": summary.get("outcome"),
         "passed": final.get("safety_pass") is True,
         "violations": final.get("safety_violations"),
         "conformance_violations": final.get("conformance_violations"),
-        "fix_rounds": (log.get("summary") or {}).get("fix_rounds", log.get("iterations", 0)),
+        "fix_rounds": summary.get("fix_rounds", log.get("iterations", 0)),
+        "tokens": (summary.get("tokens_in") or 0) + (summary.get("tokens_out") or 0) if "tokens_in" in summary else None,
+        "runtime": summary.get("runtime_seconds"),
+        # what decides the verdict: Checkov, OPA, dry-run, and output that could not be parsed
+        "violation_list": [v for v in last if v.get("tool") != "plan" or v.get("rule_id") in malformed],
+        # differences from the shared reference plan; reported, but they do not decide the verdict
+        "off_plan_list": [v for v in last if v.get("tool") == "plan" and v.get("rule_id") not in malformed],
         "files": rounds[-1]["files"] if rounds else {},
     }
