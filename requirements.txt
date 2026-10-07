@@ -1,0 +1,16 @@
+streamlit==1.32.0
+fastapi>=0.110.0
+uvicorn>=0.28.0
+pydantic>=2.0.0
+langgraph>=0.0.26
+langchain-core
+langchain-groq
+langchain-google-genai
+pytest
+zstandard<0.25.0
+checkov
+pyyaml
+python-dotenv
+pandas
+matplotlib
+PyGithub>=2.1.1

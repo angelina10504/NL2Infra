@@ -1,0 +1,50 @@
+# Checkov 3.3.26 Kubernetes rules for ordinary resources, from `checkov --list`.
+# Skipped rules (CKV_K8S_43, CKV2_K8S_6) and control-plane rules are left out. Regenerate: run_benchmark.py --write-rule-list
+CKV_K8S_8: Liveness Probe Should be Configured
+CKV_K8S_9: Readiness Probe Should be Configured
+CKV_K8S_10: CPU requests should be set
+CKV_K8S_11: CPU limits should be set
+CKV_K8S_12: Memory requests should be set
+CKV_K8S_13: Memory limits should be set
+CKV_K8S_14: Image Tag should be fixed - not latest or blank
+CKV_K8S_15: Image Pull Policy should be Always
+CKV_K8S_16: Container should not be privileged
+CKV_K8S_17: Containers should not share the host process ID namespace
+CKV_K8S_18: Containers should not share the host IPC namespace
+CKV_K8S_19: Containers should not share the host network namespace
+CKV_K8S_20: Containers should not run with allowPrivilegeEscalation
+CKV_K8S_21: The default namespace should not be used
+CKV_K8S_22: Use read-only filesystem for containers where possible
+CKV_K8S_23: Minimize the admission of root containers
+CKV_K8S_25: Minimize the admission of containers with added capability
+CKV_K8S_26: Do not specify hostPort unless absolutely necessary
+CKV_K8S_27: Do not expose the docker daemon socket to containers
+CKV_K8S_28: Minimize the admission of containers with the NET_RAW capability
+CKV_K8S_29: Apply security context to your pods and containers
+CKV_K8S_30: Apply security context to your containers
+CKV_K8S_31: Ensure that the seccomp profile is set to docker/default or runtime/default
+CKV_K8S_33: Ensure the Kubernetes dashboard is not deployed
+CKV_K8S_34: Ensure that Tiller (Helm v2) is not deployed
+CKV_K8S_35: Prefer using secrets as files over secrets as environment variables
+CKV_K8S_37: Minimize the admission of containers with capabilities assigned
+CKV_K8S_38: Ensure that Service Account Tokens are only mounted where necessary
+CKV_K8S_39: Do not use the CAP_SYS_ADMIN linux capability
+CKV_K8S_40: Containers should run as a high UID to avoid host conflict
+CKV_K8S_41: Ensure that default service accounts are not actively used
+CKV_K8S_42: Ensure that default service accounts are not actively used
+CKV_K8S_44: Ensure that the Tiller Service (Helm v2) is deleted
+CKV_K8S_45: Ensure the Tiller Deployment (Helm V2) is not accessible from within the cluster
+CKV_K8S_49: Minimize wildcard use in Roles and ClusterRoles
+CKV_K8S_152: Prevent NGINX Ingress annotation snippets which contain LUA code execution. See CVE-2021-25742
+CKV_K8S_153: Prevent All NGINX Ingress annotation snippets. See CVE-2021-25742
+CKV_K8S_154: Prevent NGINX Ingress annotation snippets which contain alias statements See CVE-2021-25742
+CKV_K8S_155: Minimize ClusterRoles that grant control over validating or mutating admission webhook configurations
+CKV_K8S_156: Minimize ClusterRoles that grant permissions to approve CertificateSigningRequests
+CKV_K8S_157: Minimize Roles and ClusterRoles that grant permissions to bind RoleBindings or ClusterRoleBindings
+CKV_K8S_158: Minimize Roles and ClusterRoles that grant permissions to escalate Roles or ClusterRoles
+CKV_K8S_159: Limit the use of git-sync to prevent code injection
+CKV2_K8S_1: RoleBinding should not allow privilege escalation to a ServiceAccount or Node on other RoleBinding
+CKV2_K8S_2: Granting `create` permissions to `nodes/proxy` or `pods/exec` sub resources allows potential privilege escalation
+CKV2_K8S_3: No ServiceAccount/Node should have `impersonate` permissions for groups/users/service-accounts
+CKV2_K8S_4: ServiceAccounts and nodes that can modify services/status may set the `status.loadBalancer.ingress.ip` field to exploit the unfixed CVE-2020-8554 and launch MiTM attacks against the cluster.
+CKV2_K8S_5: No ServiceAccount/Node should be able to read all secrets

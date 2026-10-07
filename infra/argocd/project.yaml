@@ -1,0 +1,19 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: nl2infra
+  namespace: argocd
+spec:
+  description: NL2Infra automated deployment project
+  sourceRepos:
+  - '*'
+  destinations:
+  - namespace: 'dev'
+    server: https://kubernetes.default.svc
+  - namespace: 'staging'
+    server: https://kubernetes.default.svc
+  - namespace: 'default'
+    server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+  - group: ''
+    kind: Namespace
