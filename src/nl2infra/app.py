@@ -97,7 +97,7 @@ table.nl-table td.st-ok { font-family:'IBM Plex Mono', monospace; font-size:12px
 .nl-bar { flex:1 1 0; display:flex; flex-direction:column; justify-content:flex-end; align-items:stretch; height:100%; }
 .nl-bar .n { font-family:'IBM Plex Mono', monospace; font-size:11px; text-align:center; }
 .nl-axis { display:flex; gap:10px; font-family:'IBM Plex Mono', monospace; font-size:10px; color:var(--muted); text-transform:uppercase; }
-.nl-axis span { flex:1 1 0; text-align:center; }
+.nl-axis span { flex:1 1 0; text-align:center; white-space:nowrap; text-transform:none; }
 .nl-legend { font-family:'IBM Plex Mono', monospace; font-size:10px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-top:6px; }
 .nl-legend i { display:inline-block; width:9px; height:9px; margin:0 4px 0 8px; border:1px solid var(--ink); }
 
@@ -137,6 +137,65 @@ table.nl-diff td.skip { background:#2A2A22; color:#B9B5AA; text-align:center; fo
 .nl-arm .verdict.bad { color:var(--red); }
 .nl-file { font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin:10px 0 4px 0; }
 
+/* pipeline strip */
+.nl-pipe { background:var(--panel); border:1px solid var(--line); padding:10px 6px 10px 6px; }
+.nl-pipe .arc { position:relative; height:44px; }
+.nl-pipe .arc svg { position:absolute; left:0; top:0; width:100%; height:44px; }
+.nl-pipe .arc .lab { position:absolute; left:62.5%; top:0; transform:translateX(-50%); font-family:'IBM Plex Mono', monospace; font-size:11px; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap; background:var(--panel); padding:0 6px; color:var(--muted); }
+.nl-pipe .arc.on .lab { color:var(--ink); font-weight:600; }
+.nl-pipe .arc .head { position:absolute; left:56.25%; bottom:-1px; transform:translateX(-50%); width:0; height:0; border-left:5px solid transparent; border-right:5px solid transparent; border-top:8px solid var(--line); }
+.nl-pipe .arc.on .head { border-top-color:var(--ink); }
+.nl-pipe .row { display:grid; grid-template-columns:repeat(8, minmax(0, 1fr)); }
+.nl-pipe .cell { padding:0 11px; position:relative; min-width:0; }
+.nl-pipe .cell:not(:last-child)::after { content:"→"; position:absolute; right:-7px; top:50%; transform:translateY(-50%); font-family:'IBM Plex Mono', monospace; font-size:14px; color:var(--muted); }
+.nl-pipe .box { min-height:46px; display:flex; align-items:center; justify-content:center; text-align:center; padding:4px 4px; border:1px solid var(--line); background:var(--panel); color:var(--muted); font-family:'IBM Plex Mono', monospace; font-size:11.5px; letter-spacing:.08em; text-transform:uppercase; line-height:1.25; overflow-wrap:anywhere; }
+.nl-pipe .box.done { background:var(--ink); border-color:var(--ink); color:var(--panel); }
+.nl-pipe .box.failed, .nl-pipe .box.current { background:var(--red); border-color:var(--red); color:var(--panel); }
+.nl-pipe .box.not_built { border:1px dashed var(--muted); background:transparent; }
+.nl-pipe .box.skipped { border:1px solid var(--muted); }
+.nl-pipe .note { font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--muted); text-align:center; padding:6px 4px 0 4px; line-height:1.3; overflow-wrap:anywhere; }
+.nl-pipe .note.bad { color:var(--red); }
+.nl-story { font-size:19px; font-weight:600; line-height:1.4; margin:12px 0 16px 0; padding-left:12px; border-left:4px solid var(--ink); }
+.nl-story.bad, .nl-story.live { border-left-color:var(--red); }
+.nl-story.live .nl-tag { margin:0 8px 0 0; vertical-align:2px; }
+.nl-gloss { font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--muted); margin:-2px 0 10px 0; }
+.nl-gloss b { color:var(--ink); font-weight:600; }
+.nl-key { font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--muted); margin:2px 0 6px 0; }
+.nl-key i { display:inline-block; width:22px; height:11px; margin:0 6px 0 0; vertical-align:-1px; border:1px solid var(--ink); }
+.nl-key span { margin-right:18px; }
+
+/* violation cards */
+.nl-vcard { display:grid; grid-template-columns:minmax(0, 1.05fr) minmax(0, 1.25fr) minmax(0, 1.5fr); background:var(--panel); border:1px solid var(--line); margin-bottom:8px; }
+.nl-vcard.fixed { border-left:4px solid var(--ink); }
+.nl-vcard.failing, .nl-vcard.new { border-left:4px solid var(--red); }
+.nl-vcard > div { padding:10px 14px; min-width:0; }
+.nl-vcard > div + div { border-left:1px solid var(--line); }
+.nl-vcard .name { font-weight:700; font-size:17px; line-height:1.25; }
+.nl-vcard .id { font-family:'IBM Plex Mono', monospace; font-size:11.5px; color:var(--muted); margin-top:4px; overflow-wrap:anywhere; }
+.nl-vcard .what { font-size:14px; line-height:1.4; }
+.nl-vcard .src { font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--muted); margin-top:6px; overflow-wrap:anywhere; }
+.nl-vcard .ev { font-family:'IBM Plex Mono', monospace; font-size:12.5px; background:var(--ink); color:var(--panel); padding:4px 8px; margin-top:4px; overflow-wrap:anywhere; }
+.nl-vcard .evnote { font-size:13.5px; color:var(--muted); line-height:1.4; }
+.nl-tag { display:inline-block; font-family:'IBM Plex Mono', monospace; font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; padding:2px 7px; border:1px solid var(--ink); margin-bottom:6px; }
+.nl-tag.bad { border-color:var(--red); color:var(--red); }
+@media (max-width: 900px) {
+  .nl-vcard { grid-template-columns:1fr; }
+  .nl-vcard > div + div { border-left:0; border-top:1px solid var(--line); }
+  .nl-pipe .box { font-size:9.5px; letter-spacing:.02em; }
+  .nl-pipe .cell { padding:0 7px; }
+  .nl-pipe .note { font-size:9.5px; }
+  .nl-story { font-size:16px; }
+  .nl-step { height:auto; min-height:206px; overflow:visible; }
+  .nl-step.tall { height:auto; min-height:244px; }
+  .nl-chart { height:auto; min-height:244px; }
+  .nl-step .big { font-size:38px; }
+  .nl-summary { flex-wrap:wrap; }
+  .nl-summary div { flex:1 1 30%; }
+}
+/* header: wrap into tidy blocks when the window is narrow */
+HEADER [data-testid="stHorizontalBlock"] { flex-wrap:wrap; row-gap:18px; }
+HEADER [data-testid="column"] { min-width:170px; flex:1 1 170px !important; }
+
 /* Streamlit widgets */
 .stButton > button, .stDownloadButton > button { font-family:'IBM Plex Mono', monospace; font-size:12px; letter-spacing:.12em; text-transform:uppercase; border:1px solid var(--ink); background:var(--panel); color:var(--ink); padding:.45rem .8rem; }
 .stButton > button:hover { border-color:var(--red); color:var(--red); }
@@ -170,6 +229,68 @@ def label(text: str) -> str:
     return f'<div class="nl-label">{esc(text)}</div>'
 
 
+def pipeline_strip(run: dict, waiting: bool = False, current: str = None) -> str:
+    """Section 1 of the Run tab: the eight stages, what this run did in each, and the fix loop."""
+    view = ui.pipeline_stages(run, waiting, current=current)
+    boxes = "".join(f'<div class="cell"><div class="box {esc(stage["state"])}">{esc(stage["label"])}</div></div>'
+                    for stage in view["stages"])
+    notes = "".join(
+        f'<div class="note {"bad" if stage["state"] in ("failed", "current") else ""}">{esc(stage["note"]) or "&nbsp;"}</div>'
+        for stage in view["stages"])
+    if view["looped"]:
+        loop_label = view["loop"]
+    elif run and run.get("status") == "passed":
+        loop_label = "no loop needed"
+    else:
+        loop_label = "fix loop, up to 5 rounds"
+    stroke = "#15150F" if view["looped"] else "#D6D2C8"
+    # The arc runs from Fix (6th box) back to the Gauntlet (5th box): centres at 68.75% and 56.25%.
+    arc = (f'<div class="arc {"on" if view["looped"] else ""}"><svg viewBox="0 0 800 44" preserveAspectRatio="none" aria-hidden="true">'
+           f'<path d="M 550 44 C 550 8, 450 8, 450 38" fill="none" stroke="{stroke}" stroke-width="2" '
+           f'vector-effect="non-scaling-stroke" {"" if view["looped"] else 'stroke-dasharray="5 4"'}/></svg>'
+           f'<span class="lab">{esc(loop_label)}</span><i class="head"></i></div>')
+    return f'<div class="nl-pipe">{arc}<div class="row">{boxes}</div><div class="row">{notes}</div></div>'
+
+
+def status_line(text: str) -> str:
+    """The one-line status of a run in progress, in the place the story line takes once it has finished."""
+    return f'<div class="nl-story live"><span class="nl-tag bad">Live</span> {esc(text)}</div>'
+
+
+def story_line(run: dict, waiting: bool = False) -> str:
+    bad = bool(run) and run.get("status") in ("escalated", "rejected")
+    return f'<div class="nl-story {"bad" if bad else ""}">{esc(ui.story(run, waiting))}</div>'
+
+
+TOOL_GLOSS_LINE = ('<div class="nl-gloss"><b>Gauntlet: 4 checkers.</b> ' + " &nbsp;&middot;&nbsp; ".join(
+    f'<b>{html.escape(ui.TOOL_LABELS[tool])}</b> = {html.escape(ui.TOOL_GLOSS[tool])}' for tool in ui.TOOLS) + '</div>')
+
+
+def violation_cards(cards: list) -> str:
+    if not cards:
+        return '<div class="nl-panel nl-note">No violations in this round or the one before it.</div>'
+    out = ""
+    for card in cards:
+        kind = {"fixed in this round": "fixed", "still failing": "failing", "new in this round": "new"}[card["status"]]
+        tag = {"fixed": "Fixed in this round", "failing": "Still failing", "new": "New"}[kind]
+        where = " &middot; ".join(esc(part) for part in (card.get("file"), ui.where(card)) if part and part != "-")
+        if card["known"]:
+            what = f'<div class="what">{esc(card["why"])}</div><div class="src">Checker says: {esc(card["message"])}</div>'
+        else:
+            # No entry in the rule dictionary: the title is the checker's own message and nothing is added to it.
+            what = '<div class="what nl-note">No plain-English description is on file for this rule. The title is the checker\'s own message.</div>'
+        evidence = "".join(f'<div class="ev">{esc(line)}</div>' for line in card["evidence"])
+        if card["evidence"]:
+            evidence = '<div class="evnote">Changed lines in the diff:</div>' + evidence
+        else:
+            evidence = f'<div class="evnote">{esc(card["evidence_note"])}</div>'
+        out += (f'<div class="nl-vcard {kind}"><div>{label("Rule")}<div class="name">{esc(card["name"])}</div>'
+                f'<div class="id">{esc(card["rule_id"])} &middot; {esc(ui.TOOL_LABELS.get(card["tool"], card["tool"]))}</div></div>'
+                f'<div>{label("What was wrong")}{what}<div class="src">{where}</div></div>'
+                f'<div>{label("How it was fixed")}<span class="nl-tag {"" if kind == "fixed" else "bad"}">{tag}</span>{evidence}</div></div>')
+    return out
+
+
 def plan_table(plan: dict) -> str:
     rows = ""
     for res in plan.get("resources", []):
@@ -185,7 +306,8 @@ def plan_table(plan: dict) -> str:
 
 def round_card(step: dict, selected: bool = False) -> str:
     tools = "".join(
-        f'<span>{esc(ui.TOOL_LABELS[tool])}</span><b class="{"bad" if step["tools"].get(tool) else ""}">{step["tools"].get(tool, 0)}</b>'
+        f'<span title="{esc(ui.TOOL_GLOSS[tool])}">{esc(ui.TOOL_LABELS[tool])}</span>'
+        f'<b class="{"bad" if step["tools"].get(tool) else ""}">{step["tools"].get(tool, 0)}</b>'
         for tool in ui.TOOLS)
     return (f'<div class="nl-step {"sel" if selected else ""}"><div class="lab">{esc(step["label"])} &rarr; Gauntlet</div>'
             f'<div class="big {"bad" if step["count"] else ""}">{step["count"]}</div><div class="cap">violations</div>'
@@ -232,7 +354,7 @@ def chart(rounds: list) -> str:
             f'<div title="{esc(ui.TOOL_LABELS[t])}: {counts[t]}" style="height:{counts[t] / top * 84:.1f}px;background:{TOOL_COLOURS[t]};'
             f'border:1px solid #15150F;border-bottom:0"></div>' for t in ui.TOOLS if counts[t])
         bars += f'<div class="nl-bar"><div class="n">{len(entry["violations"])}</div>{segments}</div>'
-    axis = "".join(f'<span>{"D1" if r["round"] == 0 else "F" + str(r["round"])}</span>' for r in rounds)
+    axis = "".join(f'<span>{esc(ui.round_label(r["round"]))}</span>' for r in rounds)
     legend = "".join(f'<i style="background:{TOOL_COLOURS[t]}"></i>{esc(ui.TOOL_LABELS[t])}' for t in ui.TOOLS)
     return (f'<div class="nl-chart">{label("Violations per round, by tool")}<div class="nl-bars">{bars}</div>'
             f'<div class="nl-axis">{axis}</div><div class="nl-legend">{legend}</div></div>')
@@ -335,19 +457,6 @@ def live_view():
     except Exception:
         # The server restarted and lost the in-memory run; fall back to its saved log if it finished.
         return ui.load_log(path), False, path
-
-
-def next_activity(step_name: str, log: dict) -> str:
-    done = len(log.get("rounds") or [])
-    if step_name in ("approve", "plan", "guardrails"):
-        return "Generating draft 1"
-    if step_name == "generate":
-        return "Gauntlet on draft 1"
-    if step_name == "fix":
-        return f"Gauntlet on fix {log.get('iterations', 0)}"
-    if step_name == "gauntlet" and log.get("status") == "running":
-        return f"Fix {done} of 5"
-    return "Finishing"
 
 
 # ------------------------------------------------------------------ page
@@ -457,7 +566,7 @@ def render_timeline(run_key: str) -> int:
         st.session_state[selected_key] = len(rounds) - 1
     selected = st.session_state.get(selected_key, 0)
 
-    show('<div class="nl-title">Fix loop</div>')
+    show('<div class="nl-title">Fix loop</div>' + TOOL_GLOSS_LINE)
     strip, side = st.columns([5, 2]) if rounds else (st.container(), None)
     with strip:
         columns = st.columns(len(steps))
@@ -528,10 +637,15 @@ def render_diff(run_key: str, selected: int):
         show(f'<div class="nl-note mono" style="margin-bottom:6px">{removed} line(s) removed or replaced, {added} line(s) added.</div>')
     if view == "Changes only":
         rows = ui.compact_rows(rows, context=3)
+    show('<div class="nl-key"><span><i style="background:#B3263A"></i>red = removed</span>'
+         '<span><i style="background:#D6D2C8"></i>light = added</span></div>')
     show(diff_table(rows, marks, f"Before · {ui.round_label(before['round'])}", f"After · {ui.round_label(selected)}"))
 
 
 with tab_run:
+    # In a slot, so a live run can redraw the strip and its status line as each stage finishes.
+    top_slot = st.empty()
+    top_slot.markdown((pipeline_strip(log, awaiting) + story_line(log, awaiting)).replace("\n", ""), unsafe_allow_html=True)
     decision = render_request_and_plan()
 
     if decision is not None:
@@ -539,12 +653,28 @@ with tab_run:
         pipeline = get_pipeline()
         request_id = st.session_state["live_id"]
         if decision:
-            show('<div class="nl-title">Fix loop</div>')
-        slot = st.empty()
-        if decision:
-            slot.markdown(live_strip(log, "Generating draft 1"), unsafe_allow_html=True)
-            pipeline.resume(request_id, approved=True, on_step=lambda name, state: slot.markdown(
-                live_strip(run_log(state), next_activity(name, run_log(state))), unsafe_allow_html=True))
+            show('<div class="nl-title">Fix loop</div>' + TOOL_GLOSS_LINE)
+            slot = st.empty()
+            live = {"run": log, "stage": "generate", "status": "Draft 1: calling the model, one call per resource"}
+
+            def repaint(status: str = None):
+                # Called after every graph node, before every model call and before every retry wait.
+                if status:
+                    live["status"] = status
+                top_slot.markdown(
+                    (pipeline_strip(live["run"], current=live["stage"]) + status_line(live["status"])).replace("\n", ""),
+                    unsafe_allow_html=True)
+                slot.markdown(live_strip(live["run"], live["status"]).replace("\n", ""), unsafe_allow_html=True)
+
+            def node_finished(name, state):
+                # The state handed over can be one step behind; wait until it shows this node's result.
+                live["run"] = ui.wait_for_node(lambda: run_log(pipeline.state(request_id)), name, live["run"])
+                live["stage"], status = ui.live_position(name, live["run"])
+                repaint(status)
+
+            repaint()
+            with ui.watch_llm(pipeline.llm, repaint):
+                pipeline.resume(request_id, approved=True, on_step=node_finished)
         else:
             pipeline.resume(request_id, approved=False)
         st.rerun()
@@ -558,7 +688,9 @@ with tab_run:
         if log.get("rounds"):
             render_diff(run_key, selected_round)
             show(f'<div class="nl-title">Violations, {esc(ui.round_label(selected_round)).lower()}</div>')
-            show(violations_table(ui.violation_rows(log["rounds"], selected_round)))
+            show(violation_cards(ui.violation_cards(log["rounds"], selected_round)))
+            with st.expander("Show raw table"):
+                show(violations_table(ui.violation_rows(log["rounds"], selected_round)))
         else:
             show('<div class="nl-panel nl-note" style="margin-top:14px">This run ended before any file was generated, '
                  'so there are no drafts or violations to show.</div>')
