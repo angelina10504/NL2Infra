@@ -30,3 +30,6 @@ nl2infra-manifests/
 
 # Test evidence from the audit
 test_artifacts/
+
+# Salesforce CLI tooling cache (not part of this project)
+.sf/
