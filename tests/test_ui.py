@@ -23,7 +23,7 @@ def make_log(status="passed", rounds=None, **extra):
         {"round": 0, "files": {"deployment-web.yaml": "kind: Deployment\nspec:\n  replicas: 1\n", "service-web.yaml": "kind: Service\n"},
          "violations": [violation("CKV_K8S_40"), violation("CKV_K8S_38"), violation("OPA_NO_ROOT", tool="opa", line=3)]},
         {"round": 1, "files": {"deployment-web.yaml": "kind: Deployment\nspec:\n  replicas: 1\n  runAsUser: 10001\n", "service-web.yaml": "kind: Service\n"},
-         "violations": [violation("CKV_K8S_40"), violation("CKV_K8S_22")]},
+         "violations": [violation("CKV_K8S_40"), violation("CKV_TEST_999")]},
         {"round": 2, "files": {"deployment-web.yaml": "kind: Deployment\nspec:\n  replicas: 1\n  runAsUser: 10001\n  ro: true\n", "service-web.yaml": "kind: Service\n"},
          "violations": []},
     ]
@@ -85,11 +85,11 @@ def test_violation_rows_status_and_order():
     assert {r["status"] for r in first} == {"new in this round"} and len(first) == 3
     second = ui.violation_rows(rounds, 1)
     assert [(r["rule_id"], r["status"]) for r in second] == [
-        ("CKV_K8S_40", "still failing"), ("CKV_K8S_22", "new in this round"),
+        ("CKV_K8S_40", "still failing"), ("CKV_TEST_999", "new in this round"),
         ("CKV_K8S_38", "fixed in this round"), ("OPA_NO_ROOT", "fixed in this round"),
     ]
     third = ui.violation_rows(rounds, 2)
-    assert [(r["rule_id"], r["status"]) for r in third] == [("CKV_K8S_22", "fixed in this round"), ("CKV_K8S_40", "fixed in this round")]
+    assert [(r["rule_id"], r["status"]) for r in third] == [("CKV_K8S_40", "fixed in this round"), ("CKV_TEST_999", "fixed in this round")]
 
 
 def test_diff_rows_are_aligned():
@@ -150,6 +150,163 @@ def test_arm_consistency_catches_logs_from_different_requests():
     assert ui.arm_consistency("easy-02 (repeat 1)", wrong_text)[1] == ["the arm logs hold different request texts"]
     assert ui.arm_consistency("easy-02 (repeat 1)", dict(good, A=bench_log("easy-02", "A", "Deploy nginx", repeat=2)))[1]
     assert ui.arm_consistency("nonsense", good)[0] is None
+
+
+# ---------------------------------------------------------------- story line, pipeline, rule dictionary
+
+def test_story_passed_first_time():
+    log = make_log(rounds=[{"round": 0, "files": {"a.yaml": "kind: Service\n"}, "violations": []}])
+    assert ui.story(log) == "The first draft broke no rules. All 4 checkers passed it, so no fix round was needed."
+
+
+def test_story_passed_after_n_rounds():
+    assert ui.story(make_log()) == ("The first draft broke 3 safety rules. The checkers caught all 3, the model fixed them in "
+                                    "2 rounds, and the final files passed all 4 checks.")
+    two = make_log()
+    two["rounds"] = [dict(two["rounds"][0], violations=two["rounds"][0]["violations"][:2]), dict(two["rounds"][2], round=1)]
+    two["iterations"] = 1
+    assert ui.story(two) == ("The first draft broke 2 safety rules. The checkers caught both, the model fixed them in 1 round, "
+                             "and the final files passed all 4 checks.")
+    one = make_log()
+    one["rounds"] = [dict(one["rounds"][0], violations=one["rounds"][0]["violations"][:1]), dict(one["rounds"][2], round=1)]
+    one["iterations"] = 1
+    assert ui.story(one).startswith("The first draft broke 1 safety rule. The checkers caught it, the model fixed it in 1 round")
+    off_plan = make_log()
+    off_plan["rounds"][0]["violations"] = [violation("PLAN_CONFORMANCE_IMAGE", tool="plan")]
+    assert ui.story(off_plan).startswith("The first draft broke 1 rule. ")       # not called a safety rule
+
+
+def test_story_escalated_after_five_rounds():
+    log = make_log(status="escalated", rejection_reason="max_fix_rounds: 1 violation(s) remain after 5 fix rounds")
+    stuck = {"round": 0, "files": {"deployment-web.yaml": "kind: Deployment\n"}, "violations": [violation("CKV_K8S_40")]}
+    log["rounds"] = [dict(stuck, round=n) for n in range(6)]
+    log["iterations"] = 5
+    assert ui.story(log) == ("The first draft broke 1 safety rule. After 5 fix rounds 1 violation still remained, so the run was "
+                             "escalated to a person and nothing was published.")
+    assert "passed" not in ui.story(log)
+
+
+def test_story_refused_by_guardrails_and_other_endings():
+    refused = make_log(status="rejected", rounds=[], plan=None, approved_plan=None,
+                       rejection_reason="off_topic: Request does not seem related to infrastructure.")
+    assert ui.story(refused) == ("Guardrails refused this request before any model call. Reason: off_topic: Request does not "
+                                 "seem related to infrastructure.")
+    declined = make_log(status="rejected", rounds=[], approved_plan=None, rejection_reason="plan_not_approved: no")
+    assert ui.story(declined) == "The plan was declined, so nothing was generated."
+    crashed = make_log(status="escalated", rejection_reason="tool_crash: opa: rego_parse_error")
+    assert ui.story(crashed).startswith("A checker failed to run") and "never counted as a pass" in ui.story(crashed)
+    outage = make_log(status="escalated", rounds=[], plan=None, approved_plan=None,
+                      rejection_reason="llm_unavailable: plan: RateLimitError: Error code: 429")
+    assert "stopped before any file was generated" in ui.story(outage) and "RateLimitError" not in ui.story(outage)
+    arm_a = make_log(status="escalated", arm="A", rounds=make_log()["rounds"][:1])
+    assert ui.story(arm_a) == "Benchmark arm A: one model call and no fix loop. The first draft broke 3 safety rules. 3 violations remain, with no loop to fix them."
+    assert ui.story(None).startswith("Nothing has run yet")
+    assert ui.story(make_log(status="running", rounds=[]), awaiting_approval=True).startswith("The plan is ready")
+
+
+def states(log, awaiting=False):
+    view = ui.pipeline_stages(log, awaiting)
+    return {s["key"]: s["state"] for s in view["stages"]}, {s["key"]: s["note"] for s in view["stages"]}, view["loop"]
+
+
+def test_pipeline_stages_for_each_ending():
+    state, note, loop = states(make_log())
+    assert state == {"guardrails": "done", "plan": "done", "approve": "done", "generate": "done", "gauntlet": "done", "fix": "done",
+                     "pull_request": "not_built", "argocd": "not_built"}
+    assert (note["plan"], note["generate"], note["gauntlet"], note["fix"], loop) == (
+        "1 resource", "2 files", "3 → 0 violations", "2 rounds", "looped 2 times")
+    assert note["pull_request"] == note["argocd"] == "not built yet"
+
+    state, note, loop = states(None)
+    assert set(state.values()) == {"idle", "not_built"} and loop == ""
+
+    first_time = make_log(rounds=[{"round": 0, "files": {"a.yaml": ""}, "violations": []}])
+    state, note, loop = states(first_time)
+    assert (state["gauntlet"], state["fix"], note["gauntlet"], note["fix"], loop) == ("done", "skipped", "0 violations", "not needed", "")
+
+    refused = make_log(status="rejected", rounds=[], plan=None, approved_plan=None, rejection_reason="off_topic: x")
+    state, note, _ = states(refused)
+    assert state["guardrails"] == "failed" and state["plan"] == state["gauntlet"] == "pending"
+
+    declined = make_log(status="rejected", rounds=[], approved_plan=None, rejection_reason="plan_not_approved: no")
+    state, note, _ = states(declined)
+    assert (state["plan"], state["approve"], state["generate"]) == ("done", "failed", "pending")
+
+    waiting = make_log(status="running", rounds=[], approved_plan=None)
+    assert states(waiting, awaiting=True)[0]["approve"] == "current"
+
+    stuck = make_log(status="escalated", rejection_reason="max_fix_rounds: 2 violation(s) remain after 5 fix rounds")
+    stuck["rounds"] = stuck["rounds"][:2]
+    stuck["iterations"] = 1
+    state, note, loop = states(stuck)
+    assert (state["gauntlet"], state["fix"], note["gauntlet"], loop) == ("failed", "done", "3 → 2 violations", "looped 1 time")
+
+    fix_died = make_log(status="escalated", rejection_reason="llm_unavailable: fix: timed out")
+    fix_died["rounds"] = fix_died["rounds"][:1]
+    fix_died["iterations"] = 1
+    assert states(fix_died)[0]["fix"] == "failed" and states(fix_died)[0]["gauntlet"] == "done"
+
+    no_plan = make_log(status="escalated", rounds=[], plan=None, approved_plan=None, rejection_reason="bad_llm_output: plan rejected twice")
+    assert states(no_plan)[0]["plan"] == "failed"
+
+    bench = make_log(guardrails_bypassed=True, benchmark={"id": "easy-01"}, plan_source="shared")
+    state, note, _ = states(bench)
+    assert (state["guardrails"], note["guardrails"], note["plan"], note["approve"]) == (
+        "skipped", "bypassed (benchmark)", "1 resource, shared plan", "auto-approved")
+
+
+def test_rule_dictionary_and_fallback_never_invent_a_meaning():
+    known = ui.rule_info("CKV_K8S_40", "Containers should run as a high UID to avoid host conflict")
+    assert known["known"] and known["name"] == "User ID too low" and known["why"]
+    unknown = ui.rule_info("CKV_K8S_999", "Some check that is not in the dictionary")
+    assert unknown == {"name": "Some check that is not in the dictionary", "why": "", "fields": [], "known": False}
+    assert ui.rule_info("CKV_K8S_999", "")["name"] == "CKV_K8S_999"
+    assert ui.rule_info("CKV_K8S_999", None)["why"] == ""
+    for rule, entry in ui.RULES.items():
+        assert entry["name"] and entry["why"].endswith(".") and isinstance(entry["fields"], list), rule
+
+
+@pytest.mark.skipif(not os.path.isdir(os.path.join(ROOT, "runs", "pilot")), reason="runs/pilot is not present (run logs are git-ignored)")
+def test_rule_dictionary_covers_every_rule_in_the_pilot_logs():
+    seen = set()
+    folder = os.path.join(ROOT, "runs", "pilot")
+    for name in os.listdir(folder):
+        log = ui.load_log(os.path.join(folder, name)) if name.endswith(".json") else None
+        for entry in (log or {}).get("rounds") or []:
+            seen |= {v["rule_id"] for v in entry["violations"]}
+    assert len(seen) >= 20
+    assert seen - set(ui.RULES) == set()
+
+
+def test_fix_evidence_is_copied_from_the_diff_or_empty():
+    before = "spec:\n  runAsUser: 1000\n  replicas: 1\n"
+    after = "spec:\n  automountServiceAccountToken: false\n  runAsUser: 10001\n  replicas: 1\n"
+    assert ui.fix_evidence(before, after, ["runAsUser"]) == ["runAsUser: 1000 → runAsUser: 10001"]
+    assert ui.fix_evidence(before, after, ["automountServiceAccountToken"]) == ["added: automountServiceAccountToken: false"]
+    assert ui.fix_evidence(before, after, ["livenessProbe"]) == []      # no changed line mentions it: say nothing
+    assert ui.fix_evidence(before, after, []) == []
+    assert ui.fix_evidence("a: 1\nrunAsUser: 1\n", "a: 1\n", ["runAsUser"]) == ["removed: runAsUser: 1"]
+    # a removed line is never paired with an unrelated added line that difflib happened to align with it
+    assert ui.fix_evidence("x:\n  runAsUser: 1000\n", "x:\n  automountServiceAccountToken: false\n  runAsUser: 10001\n",
+                           ["automountServiceAccountToken"]) == ["added: automountServiceAccountToken: false"]
+
+
+def test_violation_cards_statuses_and_evidence():
+    rounds = make_log()["rounds"]
+    rounds[0]["files"]["deployment-web.yaml"] = "kind: Deployment\nspec:\n  runAsUser: 1000\n"
+    rounds[1]["files"]["deployment-web.yaml"] = "kind: Deployment\nspec:\n  runAsUser: 1000\n  automountServiceAccountToken: false\n"
+    rounds[2]["files"]["deployment-web.yaml"] = "kind: Deployment\nspec:\n  runAsUser: 10001\n  automountServiceAccountToken: false\n"
+    cards = {c["rule_id"]: c for c in ui.violation_cards(rounds, 1)}
+    assert cards["CKV_K8S_38"]["status"] == "fixed in this round"
+    assert cards["CKV_K8S_38"]["evidence"] == ["added: automountServiceAccountToken: false"]
+    assert cards["CKV_K8S_40"]["status"] == "still failing" and cards["CKV_K8S_40"]["evidence"] == []
+    assert "Not fixed by this round" in cards["CKV_K8S_40"]["evidence_note"]
+    assert cards["CKV_TEST_999"]["status"] == "new in this round" and cards["CKV_TEST_999"]["known"] is False
+    assert cards["CKV_TEST_999"]["name"] == "CKV_TEST_999 failed"            # the checker's message, unchanged
+    assert cards["OPA_NO_ROOT"]["status"] == "fixed in this round" and cards["OPA_NO_ROOT"]["evidence"] == []
+    assert "See the diff of deployment-web.yaml above" in cards["OPA_NO_ROOT"]["evidence_note"]
+    final = {c["rule_id"]: c for c in ui.violation_cards(rounds, 2)}
+    assert final["CKV_K8S_40"]["evidence"] == ["runAsUser: 1000 → runAsUser: 10001"]
 
 
 def test_compact_rows_keep_three_lines_of_context_and_true_line_numbers():
@@ -227,12 +384,16 @@ def test_live_run_plan_then_approve_shows_the_loop(app):
     at.run()
     assert not at.exception
     assert "No plan yet" in page_text(at)
+    # the empty Live screen still shows the pipeline, all grey, so the page is never blank
+    assert page_text(at).count('<div class="box idle">') == 6 and page_text(at).count('<div class="box not_built">') == 2
+    assert "Nothing has run yet" in page_text(at)
 
     at.text_area(key="request").set_value("Deploy a server to the dev namespace")
     at.button(key="submit").click().run()
     assert not at.exception
     text = page_text(at)
     assert "mock-deploy" in text and "nginx:1.27-alpine" in text           # the plan table
+    assert '<div class="box current">Approve</div>' in text and "The plan is ready." in text
     assert "Fix loop" not in text and not list(runs.glob("*.json"))        # nothing generated before approval
 
     at.button(key="approve").click().run()
@@ -241,7 +402,7 @@ def test_live_run_plan_then_approve_shows_the_loop(app):
     assert "Draft 1 &rarr; Gauntlet" in text and "Fix 1 &rarr; Gauntlet" in text
     assert '<div class="status">Passed</div>' in text
     assert '<div class="nl-request">Deploy a server to the dev namespace</div>' in text   # the request, in full
-    assert [e.label for e in at.expander] == ["Plan approved: 2 resources"]
+    assert [e.label for e in at.expander] == ["Plan approved: 2 resources", "Show raw table"]
     assert "Pull request: https://github.com/mock/repo/pull/" in text
     assert "fixed in this round" in text and "CKV_K8S_1" in text           # violations table for the last round
     assert "Final status" in text and "PASSED" in text
@@ -270,6 +431,8 @@ def test_guardrail_refusal_is_shown_in_the_timeline_not_as_an_error(app):
     assert not at.exception and not at.error
     text = page_text(at)
     assert '<div class="lab">Guardrails</div>' in text and "off_topic" in text
+    assert '<div class="box failed">Guardrails</div>' in text
+    assert "Guardrails refused this request before any model call." in text
     assert "Passed" not in text
 
 
@@ -296,7 +459,18 @@ def test_replay_needs_no_api_key_and_shows_diff_and_statuses(app, monkeypatch):
     assert "Pull request not opened" in text and "Error" not in text
     assert not [w for w in at.selectbox if w.key == "role"]                # no role selector in replay
     assert "Role (saved run)" in text and "junior_dev" in text
-    assert [e.label for e in at.expander] == ["Plan approved: 1 resource"]
+    assert [e.label for e in at.expander] == ["Plan approved: 1 resource", "Show raw table"]
+    # explanatory layer: pipeline strip, story line, cards, labels
+    assert '<div class="box done">Gauntlet: 4 checkers</div>' in text and '<div class="box not_built">ArgoCD</div>' in text
+    assert "looped 2 times" in text and "3 → 0 violations" in text and "not built yet" in text
+    assert "The first draft broke 3 safety rules. The checkers caught all 3, the model fixed them in 2 rounds" in text
+    assert '<div class="name">User ID too low</div>' in text and "CKV_K8S_40 &middot; Checkov" in text
+    assert '<span class="nl-tag ">Fixed in this round</span>' in text
+    assert '<div class="name">CKV_TEST_999 failed</div>' in text             # unknown rule: the checker's own message
+    assert "No plain-English description is on file for this rule" in text
+    assert "<span>Draft 1</span><span>Fix 1</span><span>Fix 2</span>" in text and ">D1<" not in text
+    assert "red = removed" in text and "light = added" in text
+    assert "<b>OPA</b> = our team rules" in text and 'title="would Kubernetes accept it"' in text
 
     at.button(key="view_Replay a saved run_req1_1").click().run()
     text = page_text(at)
@@ -477,3 +651,170 @@ def test_every_pilot_request_shows_its_own_text_and_its_own_three_arms(app, monk
 def html_escape(text):
     import html
     return html.escape(text).replace("$", "&#36;")
+
+
+# ---------------------------------------------------------------- live run: strip, round cards and status line
+
+def test_pipeline_stages_for_a_run_in_progress():
+    waiting = make_log(status="running", rounds=[], approved_plan=None)
+    state, note, _ = states(waiting)                                   # no `current`: nothing is forced
+    view = ui.pipeline_stages(dict(waiting, approved_plan=waiting["plan"]), current="generate")
+    state = {s["key"]: s["state"] for s in view["stages"]}
+    assert state == {"guardrails": "done", "plan": "done", "approve": "done", "generate": "current", "gauntlet": "pending",
+                     "fix": "pending", "pull_request": "not_built", "argocd": "not_built"}
+
+    first_check = make_log(status="running")
+    first_check["rounds"], first_check["iterations"] = [], 0
+    state = {s["key"]: s["state"] for s in ui.pipeline_stages(first_check, current="gauntlet")["stages"]}
+    assert (state["generate"], state["gauntlet"], state["fix"]) == ("done", "current", "pending")
+
+    fixing = make_log(status="running")
+    fixing["rounds"], fixing["iterations"] = fixing["rounds"][:1], 0
+    view = ui.pipeline_stages(fixing, current="fix")
+    state = {s["key"]: s["state"] for s in view["stages"]}
+    assert (state["gauntlet"], state["fix"]) == ("done", "current")
+
+    recheck = make_log(status="running")
+    recheck["rounds"], recheck["iterations"] = recheck["rounds"][:1], 1
+    view = ui.pipeline_stages(recheck, current="gauntlet")
+    state = {s["key"]: s["state"] for s in view["stages"]}
+    assert (state["gauntlet"], state["fix"], view["loop"]) == ("current", "done", "looped 1 time")
+    # replay is untouched: no `current`, same result as before
+    assert ui.pipeline_stages(make_log()) == ui.pipeline_stages(make_log(), current=None)
+
+
+def test_live_position_after_each_node():
+    running = make_log(status="running")
+    running["rounds"], running["iterations"] = running["rounds"][:1], 0
+    assert ui.live_position("approve", running) == ("generate", "Draft 1: calling the model, one call per resource")
+    assert ui.live_position("generate", running) == ("gauntlet", "Gauntlet: checking draft 1 with 4 checkers")
+    assert ui.live_position("gauntlet", running) == ("fix", "Fix round 1: sending 3 violations back to the model")
+    assert ui.live_position("fix", dict(running, iterations=1)) == ("gauntlet", "Gauntlet: checking fix 1 with 4 checkers")
+    assert ui.live_position("gauntlet", make_log()) == (None, "Passed the Gauntlet. Finishing.")
+    assert ui.live_position("gauntlet", make_log(status="escalated")) == (None, "Escalated. Finishing.")
+    assert ui.live_position("fix", make_log(status="escalated")) == (None, "Escalated. Finishing.")
+
+
+def test_status_lines_for_calls_and_retries():
+    assert ui.call_status("fix", {"file": "deployment-redis.yaml", "round": 1}) == "Fix round 1: calling the model for deployment-redis.yaml"
+    assert ui.call_status("generate", {"file": "service-redis.yaml"}) == "Draft 1: calling the model for service-redis.yaml"
+    assert ui.retry_status(8, {"http_status": 429}) == "Rate limited, retrying in 8 s"
+    assert ui.retry_status(2, {"http_status": 503}) == "Model call failed, retrying in 2 s"
+    assert ui.retry_status(4, None) == "Model call failed, retrying in 4 s"
+
+
+def test_watch_llm_reports_calls_and_rate_limit_waits_then_restores_the_service():
+    from contracts import Plan, Violation
+    from llm_service import LLMService
+
+    class Reply:
+        def __init__(self, content):
+            self.content, self.usage_metadata = content, {"input_tokens": 1, "output_tokens": 1}
+
+    class RateLimited(Exception):
+        status_code = 429
+        response = type("R", (), {"status_code": 429, "headers": {"retry-after": "8"}})()
+
+    class Model:
+        def __init__(self):
+            self.script = [RateLimited("slow down"), Reply("kind: Deployment\n")]
+
+        def invoke(self, prompt):
+            item = self.script.pop(0)
+            if isinstance(item, Exception):
+                raise item
+            return item
+
+    waits = []
+    service = LLMService(llm=Model(), model_name="fake", sleep=waits.append)
+    original_sleep = service.sleep
+    plan = Plan(resources=[{"type": "Deployment", "name": "redis", "namespace": "dev", "spec": {"image": "redis:7.2-alpine"}}])
+    failing = [Violation(tool="checkov", rule_id="CKV_K8S_40", severity="MEDIUM", file="deployment-redis.yaml", line=1, message="m")]
+    seen = []
+    with ui.watch_llm(service, seen.append):
+        files = service.fix({"deployment-redis.yaml": "kind: Deployment\n"}, failing, plan=plan, round_number=1)
+    assert seen == [
+        "Fix round 1: calling the model for deployment-redis.yaml",
+        "Rate limited, retrying in 8 s",
+    ]
+    assert waits == [8.0] and files == {"deployment-redis.yaml": "kind: Deployment\n"}   # behaviour unchanged
+    assert len(service.call_log) == 2
+    assert "_call" not in vars(service) and service.sleep is original_sleep              # originals are back
+
+    # an exception inside the block still restores the service; the mock (no _call, no sleep) is left alone
+    with pytest.raises(RuntimeError):
+        with ui.watch_llm(service, seen.append):
+            raise RuntimeError("boom")
+    assert "_call" not in vars(service) and service.sleep is original_sleep
+    from mocks import MockLLMService
+    mock = MockLLMService()
+    with ui.watch_llm(mock, seen.append):
+        pass
+    assert vars(mock) == {}
+
+
+def test_live_run_sequence_of_strip_states_and_statuses(tmp_path):
+    """Drives the real graph with scripted services and records what the live page would paint after each node."""
+    from contracts import Plan, Violation
+    from pipeline import Pipeline
+    from storage import run_log
+
+    plan = Plan(resources=[{"type": "Deployment", "name": "redis", "namespace": "dev", "spec": {"image": "redis:7.2-alpine"}}])
+
+    class Model:
+        model_name, temperature = "fake", 0.1
+        def drain_calls(self): return []
+        def plan(self, prompt, role): return plan
+        def generate(self, plan, role): return {"deployment-redis.yaml": "draft 0"}
+        def fix(self, files, violations, plan, **kw): return {"deployment-redis.yaml": f"draft {kw['round_number']}"}
+
+    class Checker:
+        last_timings, last_scan = {}, {}
+        def __init__(self): self.calls = 0
+        def tool_versions(self): return {}
+        def skipped_checks(self): return []
+        def validate(self, files, plan, role="junior_dev"):
+            self.calls += 1
+            bad = Violation(tool="checkov", rule_id="CKV_K8S_40", severity="MEDIUM", file="deployment-redis.yaml", line=1, message="m")
+            return [bad] if self.calls == 1 else []
+
+    class Publisher:
+        def commit_and_pr(self, files, request_id, environment="dev"): return "https://github.com/a/b/pull/1"
+
+    pipeline = Pipeline(Model(), Checker(), Publisher(), auto_approve=False, run_dir=str(tmp_path))
+    pipeline.start("Deploy a redis server", "junior_dev", request_id="live1")
+    painted = []
+    latest = {"log": run_log(pipeline.state("live1"))}
+
+    def node_finished(name, state):
+        log = latest["log"] = ui.wait_for_node(lambda: run_log(pipeline.state("live1")), name, latest["log"])
+        stage, status = ui.live_position(name, log)
+        strip = {s["key"]: s["state"] for s in ui.pipeline_stages(log, current=stage)["stages"]}
+        painted.append((name, stage, status, strip["generate"], strip["gauntlet"], strip["fix"], len(log["rounds"])))
+
+    pipeline.resume("live1", approved=True, on_step=node_finished)
+    assert painted == [
+        ("approve", "generate", "Draft 1: calling the model, one call per resource", "current", "pending", "pending", 0),
+        ("generate", "gauntlet", "Gauntlet: checking draft 1 with 4 checkers", "done", "current", "pending", 0),
+        ("gauntlet", "fix", "Fix round 1: sending 1 violation back to the model", "done", "done", "current", 1),
+        ("fix", "gauntlet", "Gauntlet: checking fix 1 with 4 checkers", "done", "current", "done", 1),
+        ("gauntlet", None, "Passed the Gauntlet. Finishing.", "done", "done", "done", 2),
+        ("pull_request", None, "Passed the Gauntlet. Finishing.", "done", "done", "done", 2),
+        ("deploy", None, "Passed. Finishing.", "done", "done", "done", 2),
+    ]
+
+
+def test_wait_for_node_rereads_until_the_node_shows_up():
+    before = {"status": "running", "rounds": [], "iterations": 0}
+    stale = dict(before)
+    fresh = {"status": "running", "rounds": [{"round": 0, "violations": [], "files": {}}], "iterations": 0}
+    reads = iter([stale, stale, fresh, fresh])
+    pauses = []
+    assert ui.wait_for_node(lambda: next(reads), "gauntlet", before, pause=pauses.append) is fresh
+    assert len(pauses) == 2
+    # a state that never catches up is returned after the timeout instead of hanging
+    assert ui.wait_for_node(lambda: stale, "gauntlet", before, timeout=0.05, pause=lambda s: None) is stale
+    assert ui.node_settled("fix", {"status": "running", "iterations": 1}, before)
+    assert not ui.node_settled("generate", {"status": "running", "files": None}, before)
+    assert ui.node_settled("generate", {"status": "escalated", "files": None}, before)   # a failed node is settled too
+    assert ui.node_settled("deploy", {"status": "passed"}, before)
