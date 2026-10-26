@@ -20,8 +20,8 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(ROOT, "src", "nl2infra"))
 sys.path.insert(0, ROOT)
 
-ARMS = ("A", "B", "C")
-ARM_NAMES = {"A": "A plain", "B": "B rules in prompt", "C": "C full pipeline"}
+ARMS = ("A", "B", "C", "D")
+ARM_NAMES = {"A": "A plain", "B": "B rules in prompt", "C": "C full pipeline", "D": "D pipeline + RAG"}
 SCORED = ("scored", "no_output")
 
 

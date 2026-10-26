@@ -74,3 +74,17 @@ lines each, newest first.
   score against the same plans.
 - **The "why?" bot is retrieval-only (no LLM).** It indexes run-log summaries and composes a deterministic,
   cited explanation — free, offline, and it cannot hallucinate a reason. Exposed at `POST /api/why`.
+
+## Phase 5 — Benchmark dataset & evaluation
+- **Dataset expanded to 30 correctness + 40 adversarial**, same JSONL format. Correctness prompts are
+  role/environment-consistent so the guardrails never falsely refuse them (verified: 0/30). Adversarial
+  entries carry a `category` covering all eight required attack families.
+- **Honest guardrail numbers, computed deterministically:** 45% (18/40) adversarial refusal, 0% false
+  refusal. The 22 "let through" are manifest-level attacks (privileged, hostPath, latest tag, missing
+  limits, wrong apiVersion, plaintext secret) — by design these are the Gauntlet's job, not the input
+  filter's. This is the correct figure for a two-layer design and is documented as such in results/.
+- **The full 70×3×4-arm LLM benchmark was NOT run here** (no GROQ_API_KEY, no checkov/conftest/kubectl).
+  `results/README.md` gives the exact commands and is explicit about not fabricating numbers. The static
+  "100% / 40 of 40" tiles in the HTML dashboard are flagged as illustrative placeholders.
+- **evaluate.py / charts.py both learned arm D.** Charts use the Agg backend and are tested against
+  synthetic logs (no real run needed to prove they render).
