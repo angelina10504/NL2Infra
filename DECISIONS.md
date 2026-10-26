@@ -102,3 +102,17 @@ lines each, newest first.
 - **CI badge + full README added** (`angelina10504/NL2Infra`). The README also folds in most of
   Phase 7's doc asks (Mermaid architecture, quick start, tests, observability, ethics & limits,
   tier-2 sketch).
+
+## Phase 7 — GitOps, docs & cleanup
+- **Real PR flow already existed** in `gitops.py` (PyGithub + `GITHUB_TOKEN`, local fallback). Phase 7
+  added the missing pieces: a `manifests-repo-template/` scaffold for the separate GitOps repo
+  (dev/staging/production folders + README), ArgoCD `Application`s for all three environments, and the
+  `nl2infra` `AppProject` extended to whitelist `production`.
+- **Production ArgoCD app is manual-sync by design** (no `automated:` block): dev/staging auto-sync and
+  self-heal, production is a human promotion. Documented in `docs/gitops.md`.
+- **`MANIFESTS_REPO` added to `.env.example`**; `GitOpsService` already reads it.
+- **Removed `web/index.html`** — a 331-line stale stub that made no API calls and was referenced by
+  nothing (TEST_REPORT already flagged it as a non-functional duplicate of `templates/index.html`).
+- **Fresh-clone run verified:** `python -m uvicorn server:app --app-dir src/nl2infra --port 8000` in
+  mock mode serves `/`, `/metrics` and `/events` (all 200) with no errors.
+- 5 GitOps/ArgoCD tests added. Full suite: 266 passed, 35 skipped.

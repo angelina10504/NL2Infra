@@ -145,11 +145,28 @@ python eval/charts.py   --runs runs/benchmark --out results/charts
 See [`results/README.md`](results/README.md) for the real, reproducible guardrail numbers and an
 honest note on what still needs a credentialed run.
 
+## GitOps & ArgoCD
+
+NL2Infra opens a pull request in a **separate manifests repository** (templated in
+[`manifests-repo-template/`](manifests-repo-template/)); a human merges it and ArgoCD syncs it to the
+kind cluster. `dev`/`staging` auto-sync, `production` is a manual promotion. Full setup — manifests
+repo, `GITHUB_TOKEN`/`MANIFESTS_REPO`, ArgoCD install and the per-environment `Application`s — is in
+[`docs/gitops.md`](docs/gitops.md). Without a token, the pipeline falls back to writing manifests
+locally, so it still works offline.
+
 ## CI
 
 GitHub Actions runs on every PR: ruff lint, the full pytest suite, the 33 Rego tests, Checkov on
 sample manifests, and an offline smoke benchmark. A separate **advisory** job posts an AI-written
 risk summary as a PR comment — it can only comment; it never approves or merges.
+
+## Screenshots
+
+Capture these once the app is running (and drop them in `docs/screenshots/`):
+
+- the dashboard with the notification bell + a live toast (`GET /`),
+- an `approval_required` card with Approve / Reject,
+- the Grafana **NL2Infra Overview** dashboard (`http://localhost:3000`).
 
 ## Roles
 

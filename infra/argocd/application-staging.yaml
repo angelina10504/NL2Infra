@@ -1,0 +1,22 @@
+# ArgoCD Application for the staging environment.
+# Replace the repoURL with your own manifests repo before applying.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nl2infra-staging
+  namespace: argocd
+spec:
+  project: nl2infra
+  source:
+    repoURL: https://github.com/YOUR_GH_USERNAME/nl2infra-manifests.git
+    targetRevision: main
+    path: staging
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: staging
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true

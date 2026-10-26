@@ -1,0 +1,2 @@
+# Generated manifests for the production environment.
+# NL2Infra opens pull requests that add/update YAML here. ArgoCD syncs this folder to the production namespace.
