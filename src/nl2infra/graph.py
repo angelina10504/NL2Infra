@@ -11,6 +11,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import interrupt
 
+import metrics as _metrics
 from contracts import RunState, Violation, CLUSTER_SCOPED_KINDS
 from guardrails import check_guardrails, RateLimiter
 from llm_service import LLMError
@@ -127,6 +128,10 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
 
     def gauntlet(state: RunState):
         state.violations = validator.validate(state.files, state.approved_plan, role=state.user_role)
+        try:
+            _metrics.record_round_violations(state.violations)
+        except Exception:
+            pass
         state.rounds = state.rounds + [{
             "round": state.iterations,
             "files": dict(state.files),

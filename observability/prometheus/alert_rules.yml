@@ -1,0 +1,37 @@
+groups:
+  - name: nl2infra
+    rules:
+      # Success rate below 80% over the last 10 minutes.
+      - alert: LowSuccessRate
+        expr: |
+          (
+            sum(rate(nl2infra_requests_total{status="passed"}[10m]))
+            /
+            clamp_min(sum(rate(nl2infra_requests_total[10m])), 0.0001)
+          ) < 0.8
+        for: 10m
+        labels:
+          severity: critical
+        annotations:
+          summary: "NL2Infra success rate below 80% for 10 minutes"
+          description: "Fewer than 80% of completed runs are passing."
+
+      # More than 3 runs escalated (e.g. fix loop exhausted) in the last hour.
+      - alert: FixLoopExhaustedSpike
+        expr: increase(nl2infra_requests_total{status="escalated"}[1h]) > 3
+        for: 0m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 3 escalations in the last hour"
+          description: "Runs are escalating (fix loop exhausted or tool failure) more than 3 times per hour."
+
+      # A plan has been waiting for approval for over 15 minutes.
+      - alert: PendingApprovalsStale
+        expr: nl2infra_pending_approvals > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "A plan has been pending approval for over 15 minutes"
+          description: "At least one run is still waiting for a human to approve its plan."

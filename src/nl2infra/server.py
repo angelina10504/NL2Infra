@@ -18,6 +18,8 @@ from guardrails import check_guardrails
 from pipeline import Pipeline
 from storage import load_runs
 import notifications
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+from fastapi.responses import Response
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +195,41 @@ async def guardrail_compare(req: GuardrailCompareRequest):
 async def get_runs():
     runs = load_runs()
     return [r.model_dump() for r in runs[-20:]]
+
+
+# ------------------------------------------------------------------- metrics
+
+@app.get("/metrics")
+async def metrics_endpoint():
+    """Prometheus scrape target."""
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+@app.post("/alerts/webhook")
+async def alerts_webhook(payload: dict):
+    """Alertmanager posts here; each firing alert becomes a dashboard notification so
+    system-health alerts also show up in the bell."""
+    alerts = payload.get("alerts", []) if isinstance(payload, dict) else []
+    # Map each Prometheus alert to a dashboard event type (all are valid EVENT_TYPES).
+    alert_to_event = {
+        "LowSuccessRate": "high_failure_rate",
+        "FixLoopExhaustedSpike": "fix_loop_exhausted",
+        "PendingApprovalsStale": "approval_required",
+    }
+    emitted = 0
+    for alert in alerts:
+        if alert.get("status") == "resolved":
+            continue
+        labels = alert.get("labels", {}) or {}
+        annotations = alert.get("annotations", {}) or {}
+        name = labels.get("alertname", "alert")
+        event_type = alert_to_event.get(name, "high_failure_rate")
+        severity = "critical" if labels.get("severity") == "critical" else "warning"
+        message = annotations.get("summary") or annotations.get("description") or name
+        notifications.emit_event_safe(event_type, severity, None, f"[{name}] {message}",
+                                      metadata={"labels": labels})
+        emitted += 1
+    return {"ok": True, "emitted": emitted}
 
 
 # ----------------------------------------------------------------- notifications

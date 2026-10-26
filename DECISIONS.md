@@ -40,3 +40,21 @@ lines each, newest first.
   for a live bell + toasts via `EventSource`. The Streamlit app stays the run/replay analysis view.
 - **`channels` is a dispatch table** (`CHANNELS`, default `("dashboard",)`). Email/Slack = register one
   function with `register_channel(...)`; no other code changes. Not implemented now, by design.
+
+## Phase 3 — Observability (Prometheus + Grafana + Alertmanager)
+- **Metrics recorded from the pipeline, not scattered.** `metrics.py` holds the Prometheus singletons;
+  `pipeline._drive` records one run at completion (status, env, rounds, duration, tokens, latency) and
+  maintains the `pending_approvals` gauge (inc on pause, dec on completion). Per-round violations are
+  counted in the graph's gauntlet node. All metric calls are wrapped so they never break a run.
+- **Counter names keep the `_total` suffix.** prometheus_client leaves a name that already ends in
+  `_total` unchanged, so `Counter("nl2infra_requests_total")` exposes exactly `nl2infra_requests_total`
+  (matching the spec), not `..._total_total`.
+- **Prometheus scrapes the host, not a container.** The app runs on the host (`:8000`); the stack uses
+  `host.docker.internal:8000` (with `extra_hosts: host-gateway` for Linux parity). Alertmanager posts to
+  `host.docker.internal:8000/alerts/webhook`.
+- **Alertmanager → `/alerts/webhook` → `emit_event`** so system-health alerts also land in the dashboard
+  bell. `FixLoopExhaustedSpike` uses `status="escalated"` as the signal (there is no separate exhausted
+  counter); documented as a proxy.
+- **Docker not installed on the dev box**, so the stack is validated by parsing every config file and
+  checking the Grafana dashboard only queries exported metrics (`test_observability_config.py`). Running
+  it needs `docker compose -f docker-compose.observability.yml up -d` on a machine with Docker.

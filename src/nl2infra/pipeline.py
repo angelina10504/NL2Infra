@@ -16,8 +16,10 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.types import Command
 
+import metrics as _metrics
 from contracts import Plan, RunState
 from graph import create_graph, default_services
+from guardrails import detect_environment
 from notifications import emit_event_safe
 from storage import save_run, git_commit
 
@@ -33,6 +35,7 @@ class Pipeline:
             gitops = gitops or default_gitops
         self.llm, self.validator, self.gitops = llm, validator, gitops
         self.run_dir = run_dir
+        self._pending_approval: set = set()  # request_ids counted in the pending_approvals gauge
         self.graph = create_graph(
             llm, validator, gitops, auto_approve=auto_approve,
             # The paused run is restored from the checkpoint; name the contract types it may rebuild.
@@ -59,9 +62,37 @@ class Pipeline:
                 f"Plan ready for approval: {count} resource(s)",
                 metadata={"plan": state.plan.model_dump() if state.plan else None, "role": state.user_role},
             )
+            if request_id not in self._pending_approval:
+                self._pending_approval.add(request_id)
+                self._safe_metric(lambda: _metrics.pending_approvals.inc())
         else:
             save_run(state, self.run_dir)
+            if request_id in self._pending_approval:
+                self._pending_approval.discard(request_id)
+                self._safe_metric(lambda: _metrics.pending_approvals.dec())
+            self._record_metrics(state)
         return state
+
+    @staticmethod
+    def _safe_metric(func) -> None:
+        try:
+            func()
+        except Exception:
+            pass
+
+    def _record_metrics(self, state: RunState) -> None:
+        """Push one finished run into the Prometheus metrics. Never breaks a run."""
+        def do():
+            env = detect_environment(state.user_prompt)
+            if state.status == "rejected" and state.rejection_reason:
+                _metrics.record_blocked(state.rejection_reason.split(":", 1)[0])
+            _metrics.record_run(
+                status=state.status, env=env, iterations=state.iterations,
+                duration=state.metrics.get("total_time"),
+                tokens_in=state.metrics.get("tokens_in"), tokens_out=state.metrics.get("tokens_out"),
+                llm_call_seconds=[c.get("seconds") for c in state.llm_calls],
+            )
+        self._safe_metric(do)
 
     def state(self, request_id: str) -> RunState:
         return RunState.model_validate(self.graph.get_state(self._config(request_id)).values)

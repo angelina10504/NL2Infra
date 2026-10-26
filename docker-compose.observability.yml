@@ -1,0 +1,53 @@
+# NL2Infra observability stack: Prometheus + Alertmanager + Grafana.
+#
+# The NL2Infra app runs on the host (uvicorn on :8000). These containers reach it through
+# host.docker.internal, and Alertmanager posts firing alerts back to the app's /alerts/webhook
+# so they also appear in the dashboard bell.
+#
+# Start:   docker compose -f docker-compose.observability.yml up -d
+# Grafana: http://localhost:3000  (anonymous admin; dashboard "NL2Infra Overview" is pre-provisioned)
+# Prom:    http://localhost:9090      Alertmanager: http://localhost:9093
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: nl2infra-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: nl2infra-alertmanager
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: nl2infra-grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_AUTH_ANONYMOUS_ENABLED=true
+      - GF_AUTH_ANONYMOUS_ORG_ROLE=Admin
+      - GF_USERS_DEFAULT_THEME=light
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

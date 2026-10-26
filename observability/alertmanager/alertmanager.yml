@@ -1,0 +1,13 @@
+route:
+  receiver: nl2infra-dashboard
+  group_by: ["alertname"]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 1h
+
+receivers:
+  - name: nl2infra-dashboard
+    webhook_configs:
+      # The app turns each firing alert into a dashboard notification (bell).
+      - url: "http://host.docker.internal:8000/alerts/webhook"
+        send_resolved: false
