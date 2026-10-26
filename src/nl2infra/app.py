@@ -20,7 +20,7 @@ import ui_data as ui
 from storage import run_log
 
 RUNS_DIR = os.environ.get("NL2INFRA_RUNS_DIR", "runs")
-ROLES = ["junior_dev", "senior_dev", "platform_admin"]
+ROLES = ["developer", "admin", "viewer"]  # viewer is read-only; the guardrails block its submissions
 LIVE, REPLAY = "Live run", "Replay a saved run"
 TOOL_COLOURS = {"checkov": "#B3263A", "opa": "#15150F", "dry-run": "#6D6A60", "plan": "#E7CCCB"}
 

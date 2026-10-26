@@ -80,6 +80,7 @@ class RunState(BaseModel):
     request_id: str
     user_role: str
     user_prompt: str
+    user_id: str = "anonymous"   # who submitted; used for per-user rate limiting
     plan: Optional[Plan] = None
     files: Optional[Files] = None
     violations: List[Violation] = []

@@ -190,11 +190,21 @@ def test_validate_with_nothing_to_scan_is_never_a_pass(monkeypatch):
 # ---------------------------------------------------------------- tool crashes
 
 def fake_tool(tmp_path, name, stdout="", exit_code=0, stderr=""):
-    """A real executable that prints fixed output, to drive the validators through subprocess."""
+    """A real executable that prints fixed output, to drive the validators through subprocess.
+
+    On POSIX this is a /bin/sh script; on Windows it is a .bat wrapper, since subprocess
+    does not honour the shebang there. Both echo the captured stdout/stderr and exit code.
+    """
+    out = tmp_path / f"{name}.out"
+    err = tmp_path / f"{name}.err"
+    out.write_text(stdout)
+    err.write_text(stderr)
+    if os.name == "nt":
+        path = tmp_path / f"{name}.bat"
+        path.write_text(f'@echo off\r\ntype "{out}"\r\ntype "{err}" 1>&2\r\nexit /b {exit_code}\r\n')
+        return str(path)
     path = tmp_path / name
-    (tmp_path / f"{name}.out").write_text(stdout)
-    (tmp_path / f"{name}.err").write_text(stderr)
-    path.write_text(f'#!/bin/sh\ncat "{path}.out"\ncat "{path}.err" >&2\nexit {exit_code}\n')
+    path.write_text(f'#!/bin/sh\ncat "{out}"\ncat "{err}" >&2\nexit {exit_code}\n')
     path.chmod(path.stat().st_mode | stat.S_IEXEC)
     return str(path)
 

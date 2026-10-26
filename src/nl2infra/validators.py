@@ -17,9 +17,14 @@ TOOL_CRASH = "TOOL_CRASH"
 # One policy pack per role. A role without an entry has no pack, which is a
 # TOOL_CRASH rather than an unchecked run.
 ROLE_PACKS = {
+    # Legacy role names (kept for existing run logs and tests).
     "junior_dev": ["base"],
     "senior_dev": ["base", "staging"],
     "platform_admin": ["base", "staging", "production"],
+    # Canonical role names (viewer/developer/admin). See guardrails.ROLE_ALIASES.
+    "viewer": ["base"],
+    "developer": ["base", "staging"],
+    "admin": ["base", "staging", "production"],
 }
 
 # kubectl failures that say nothing about the manifest: the cluster or the

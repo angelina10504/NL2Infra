@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 from collections import Counter
@@ -11,10 +12,12 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.types import interrupt
 
 from contracts import RunState, Violation, CLUSTER_SCOPED_KINDS
-from guardrails import check_guardrails
+from guardrails import check_guardrails, RateLimiter
 from llm_service import LLMError
 from timing import track_time
 from validators import is_tool_crash
+
+logger = logging.getLogger(__name__)
 
 MAX_FIX_ROUNDS = 5
 
@@ -30,7 +33,8 @@ def default_services():
     return LLMService(), Validators(), GitOpsService()
 
 
-def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = False, checkpointer=None):
+def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = False, checkpointer=None,
+                 rate_limiter=None):
     """Builds the pipeline:
 
     guardrails -> plan -> approve -> generate -> gauntlet -> fix (back to gauntlet,
@@ -44,6 +48,8 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
         llm = llm or default_llm
         validator = validator or default_validator
         gitops = gitops or default_gitops
+    # One limiter per graph: a fresh in-memory per-user request budget.
+    limiter = rate_limiter if rate_limiter is not None else RateLimiter()
 
     def node(timer_key, func):
         """Runs func(state), which mutates state, and returns the whole state as the update."""
@@ -74,9 +80,15 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
         if state.guardrails_bypassed:
             return  # benchmark correctness runs measure generation, not guardrails; the flag is in the run log
         reason = check_guardrails(state)
+        if not reason:
+            # Deterministic checks passed; apply the per-user rate limit last.
+            limited = limiter.check(state.user_id)
+            if limited:
+                reason = f"rate_limited: {limited}"
         if reason:
             state.status = "rejected"
             state.rejection_reason = reason
+            logger.warning("Request %s blocked by guardrails: %s", state.request_id, reason)
 
     def plan(state: RunState):
         if state.plan is not None:
