@@ -5,6 +5,8 @@
   B = one LLM call with the rule list in the prompt
   C = the full pipeline (approval auto-confirmed); its generate prompt carries the
       same rule list as B, so the only difference between B and C is the fix loop
+  D = the full pipeline + RAG: the generate prompt is additionally grounded with the
+      most relevant policies and a past approved manifest retrieved from the knowledge base
 
 One planner call is made per request and repeat and shared by all three arms, so
 plan conformance is measured against the same plan everywhere. Its tokens are
@@ -36,7 +38,9 @@ from rules import OPA_RULES, RULE_LIST_FILE, rules_for_role  # noqa: E402,F401
 from storage import git_commit, run_log  # noqa: E402
 from validators import is_tool_crash  # noqa: E402
 
-ARMS = ("A", "B", "C")
+ARMS = ("A", "B", "C", "D")          # all valid arms
+DEFAULT_ARMS = ("A", "B", "C")       # what "--arm all" expands to; D is opt-in (--arm D)
+PIPELINE_ARMS = ("C", "D")
 MAX_FIX_ROUNDS = 5
 DEFAULT_FILE = os.path.join(ROOT, "benchmarks", "correctness.jsonl")
 
@@ -122,7 +126,7 @@ def summarise(log: dict) -> dict:
     calls = [c for c in log.get("llm_calls", []) if c.get("stage") != "plan"]
     waited = sum(c.get("waited_seconds") or 0 for c in calls)
     metrics = log.get("metrics", {})
-    if log["arm"] == "C":
+    if log["arm"] in ("C", "D"):
         runtime = sum(metrics.get(k, 0.0) for k in ("generation_time", "validation_time", "fix_time")) - waited
     else:
         runtime = sum(c.get("seconds") or 0 for c in calls)
@@ -196,11 +200,14 @@ def run_single_call_arm(arm: str, request: dict, repeat: int, run_id: str, plan:
     return state
 
 
-def run_pipeline_arm(request: dict, repeat: int, run_id: str, plan: Plan, pipeline) -> RunState:
-    """Arm C: the real graph, given the shared plan, approval auto-confirmed, guardrails bypassed."""
+def run_pipeline_arm(request: dict, repeat: int, run_id: str, plan: Plan, pipeline, arm: str = "C") -> RunState:
+    """Arm C/D: the real graph, given the shared plan, approval auto-confirmed, guardrails bypassed.
+
+    Arm D's pipeline uses an LLMService with a RAG retriever, so its generate prompt is grounded.
+    """
     return pipeline.start(
-        request["prompt"], request["role"], request_id=run_id, arm="C", plan=plan, bypass_guardrails=True,
-        benchmark={"id": request["id"], "tier": request.get("tier"), "arm": "C", "repeat": repeat,
+        request["prompt"], request["role"], request_id=run_id, arm=arm, plan=plan, bypass_guardrails=True,
+        benchmark={"id": request["id"], "tier": request.get("tier"), "arm": arm, "repeat": repeat,
                    "expected": request.get("expected")},
     )
 
@@ -249,6 +256,8 @@ def count_calls(requests: List[dict], arms: List[str], repeats: int) -> dict:
         # generate: one call per resource. fix: 0 to 5 rounds, at most one call per file per round.
         "C": (sum(resources) * repeats, sum(resources) * (1 + MAX_FIX_ROUNDS) * repeats) if "C" in arms else (0, 0),
     }
+    if "D" in arms:
+        per_arm["D"] = (sum(resources) * repeats, sum(resources) * (1 + MAX_FIX_ROUNDS) * repeats)
     return {"per_arm": per_arm, "min": sum(lo for lo, _ in per_arm.values()), "max": sum(hi for _, hi in per_arm.values()),
             "runs": n * len(arms), "unknown_sizes": [r["id"] for r in requests if not r.get("resources")]}
 
@@ -283,7 +292,7 @@ def print_dry_count(requests: List[dict], arms: List[str], repeats: int, out_dir
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--arm", default="all", help="A, B, C or all (default)")
+    parser.add_argument("--arm", default="all", help="A, B, C, D or all (default)")
     parser.add_argument("--tier", choices=["easy", "medium", "hard"], help="only requests of this tier")
     parser.add_argument("--limit", type=int, help="only the first N requests after the tier filter")
     parser.add_argument("--repeats", type=int, default=3, help="repeats per request (default 3)")
@@ -295,9 +304,9 @@ def main(argv=None) -> int:
     parser.add_argument("--write-rule-list", action="store_true", help="regenerate benchmarks/rule_list.txt from Checkov and exit")
     args = parser.parse_args(argv)
 
-    arms = list(ARMS) if args.arm.lower() == "all" else [args.arm.upper()]
+    arms = list(DEFAULT_ARMS) if args.arm.lower() == "all" else [args.arm.upper()]
     if any(a not in ARMS for a in arms):
-        parser.error("--arm must be A, B, C or all")
+        parser.error("--arm must be A, B, C, D or all")
 
     if args.write_rule_list:
         from validators import Validators
@@ -330,6 +339,20 @@ def main(argv=None) -> int:
     pipeline = Pipeline(llm, validator, NoPublishGitOps(), auto_approve=True, run_dir=os.path.join(args.out, "_pipeline"))
     print(f"\nModel: {llm.model_name}   temperature: {llm.temperature}   tools: {validator.tool_versions()}")
 
+    # Arm D reuses the same graph, but with a RAG-grounded LLM service.
+    rag_pipeline = None
+    if "D" in arms:
+        from rag import get_retriever
+        retriever = get_retriever(runs_dir="runs", include_examples=True)
+        if retriever is None:
+            print("WARNING: RAG retriever could not be built; arm D is skipped.")
+            arms = [a for a in arms if a != "D"]
+        else:
+            rag_llm = LLMService(retriever=retriever)
+            rag_pipeline = Pipeline(rag_llm, validator, NoPublishGitOps(), auto_approve=True,
+                                    run_dir=os.path.join(args.out, "_pipeline_rag"))
+            print(f"RAG knowledge base: {len(retriever.documents)} documents")
+
     for request in requests:
         for repeat in range(1, args.repeats + 1):
             paths = {arm: os.path.join(args.out, f"{request['id']}-{arm}-r{repeat}.json") for arm in arms}
@@ -360,8 +383,9 @@ def main(argv=None) -> int:
                            "summary": {"outcome": "plan_failed"}}
                 else:
                     plan = Plan.model_validate(plan_record["plan"])
-                    if arm == "C":
-                        state = run_pipeline_arm(request, repeat, run_id, plan, pipeline)
+                    if arm in PIPELINE_ARMS:
+                        state = run_pipeline_arm(request, repeat, run_id, plan,
+                                                 rag_pipeline if arm == "D" else pipeline, arm=arm)
                     else:
                         state = run_single_call_arm(arm, request, repeat, run_id, plan, llm, validator)
                     log = run_log(state)

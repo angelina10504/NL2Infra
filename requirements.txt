@@ -15,3 +15,8 @@ python-dotenv
 pandas
 matplotlib
 PyGithub>=2.1.1
+# RAG (Phase 4): offline TF-IDF embeddings + FAISS vector store. langchain is used for the
+# document abstractions; sentence-transformers is optional (NL2INFRA_EMBEDDINGS=hf).
+scikit-learn
+faiss-cpu
+langchain>=0.1.0

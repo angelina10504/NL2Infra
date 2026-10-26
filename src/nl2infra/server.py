@@ -191,6 +191,21 @@ async def guardrail_compare(req: GuardrailCompareRequest):
     }
 
 
+class WhyRequest(BaseModel):
+    question: str
+
+
+@app.post("/api/why")
+async def why(req: WhyRequest):
+    """RAG Q&A over the run logs: 'Why was my request blocked or changed?'"""
+    from rag import answer_why
+    runs_dir = os.environ.get("NL2INFRA_RUNS_DIR", "runs")
+    try:
+        return answer_why(req.question, runs_dir=runs_dir)
+    except Exception as error:
+        return JSONResponse({"error": str(error)}, status_code=500)
+
+
 @app.get("/api/runs")
 async def get_runs():
     runs = load_runs()

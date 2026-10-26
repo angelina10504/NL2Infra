@@ -58,3 +58,19 @@ lines each, newest first.
 - **Docker not installed on the dev box**, so the stack is validated by parsing every config file and
   checking the Grafana dashboard only queries exported metrics (`test_observability_config.py`). Running
   it needs `docker compose -f docker-compose.observability.yml up -d` on a machine with Docker.
+
+## Phase 4 — RAG over policies
+- **Offline TF-IDF embeddings by default, not a downloaded model.** scikit-learn TF-IDF + FAISS
+  (inner-product on L2-normalised vectors) keeps the KB free, local and CI-safe with no network.
+  `NL2INFRA_EMBEDDINGS=hf` opts into sentence-transformers. langchain is a listed dep but the retriever
+  is deliberately light. (chromadb/llama_index aren't installed; FAISS is, so FAISS is the vector store.)
+- **A camelCase/identifier-splitting preprocessor** (`runAsNonRoot` → `run as non root`) plus a short
+  keyword hint per OPA rule makes plain-English queries ("running as root", "latest tag") retrieve the
+  right policy. Verified by a parametrized test over 8 queries.
+- **RAG is an optional `retriever` on `LLMService`.** When set, the generate prompt gets a grounding
+  block (top policies + one approved example). Benchmark arm D is just arm C with that retriever wired in.
+- **`--arm all` stays A,B,C; arm D is opt-in (`--arm D`).** Keeps every existing benchmark/eval test and
+  the 3-column evaluate.py unchanged. Arm D reuses the shared plan file, so `--arm all` then `--arm D`
+  score against the same plans.
+- **The "why?" bot is retrieval-only (no LLM).** It indexes run-log summaries and composes a deterministic,
+  cited explanation — free, offline, and it cannot hallucinate a reason. Exposed at `POST /api/why`.

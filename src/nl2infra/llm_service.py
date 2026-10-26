@@ -184,7 +184,11 @@ def _text(response) -> str:
 
 
 class LLMService:
-    def __init__(self, llm=None, model_name: Optional[str] = None, sleep: Callable[[float], None] = time.sleep):
+    def __init__(self, llm=None, model_name: Optional[str] = None, sleep: Callable[[float], None] = time.sleep,
+                 retriever=None):
+        # Optional RAG retriever: when set, the generate prompt is grounded with the most
+        # relevant policies and a past approved example (benchmark arm D).
+        self.retriever = retriever
         self.groq_api_key = os.environ.get("GROQ_API_KEY")
         self.gemini_api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
         self.provider = os.environ.get("LLM_PROVIDER", "").lower()
@@ -293,6 +297,14 @@ class LLMService:
             resource_json=resource.model_dump_json(indent=2),
             rules=rules_for_role(role),
         )
+        if self.retriever is not None:
+            try:
+                context = self.retriever.context_for_resource(resource)
+            except Exception:
+                context = ""
+            if context:
+                prompt += ("\n\nRelevant policies and past approved manifests, retrieved for grounding "
+                           "(use them as guidance; still follow the rules above):\n" + context)
         return _extract_yaml(self._call(prompt, "generate", file=filename))
 
     def generate(self, plan: Plan, role: str) -> Dict[str, str]:
