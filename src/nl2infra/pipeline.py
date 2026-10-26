@@ -18,6 +18,7 @@ from langgraph.types import Command
 
 from contracts import Plan, RunState
 from graph import create_graph, default_services
+from notifications import emit_event_safe
 from storage import save_run, git_commit
 
 StepCallback = Optional[Callable[[str, RunState], None]]
@@ -50,7 +51,15 @@ class Pipeline:
                 if on_step and not step_name.startswith("__"):
                     on_step(step_name, self.state(request_id))
         state = self.state(request_id)
-        if not self.awaiting_approval(request_id):
+        if self.awaiting_approval(request_id):
+            # Fires once, when the run pauses: the langgraph node body would re-run on resume.
+            count = len(state.plan.resources) if state.plan else 0
+            emit_event_safe(
+                "approval_required", "info", request_id,
+                f"Plan ready for approval: {count} resource(s)",
+                metadata={"plan": state.plan.model_dump() if state.plan else None, "role": state.user_role},
+            )
+        else:
             save_run(state, self.run_dir)
         return state
 

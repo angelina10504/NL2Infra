@@ -5,7 +5,7 @@ import json
 import logging
 from typing import Optional, Dict, Any
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -17,6 +17,7 @@ from contracts import RunState, Plan, Resource, Violation
 from guardrails import check_guardrails
 from pipeline import Pipeline
 from storage import load_runs
+import notifications
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +193,37 @@ async def guardrail_compare(req: GuardrailCompareRequest):
 async def get_runs():
     runs = load_runs()
     return [r.model_dump() for r in runs[-20:]]
+
+
+# ----------------------------------------------------------------- notifications
+
+@app.get("/events")
+async def get_events(unread_only: bool = False, limit: int = 50):
+    """The notification feed, newest first. `unread_only` filters to unread events."""
+    return {
+        "events": notifications.list_events(unread_only=unread_only, limit=limit),
+        "unread": notifications.unread_count(),
+    }
+
+
+@app.post("/events/{event_id}/read")
+async def mark_event_read(event_id: str):
+    found = notifications.mark_read(event_id)
+    if not found:
+        return JSONResponse({"error": "event not found"}, status_code=404)
+    return {"ok": True, "unread": notifications.unread_count()}
+
+
+@app.post("/events/read-all")
+async def mark_all_events_read():
+    changed = notifications.mark_all_read()
+    return {"ok": True, "marked": changed, "unread": notifications.unread_count()}
+
+
+@app.get("/events/stream")
+async def stream_events():
+    """Server-Sent Events: pushes each new event to the browser for live toasts."""
+    return StreamingResponse(notifications.event_stream(), media_type="text/event-stream")
 
 
 @app.get("/api/cluster")

@@ -16,6 +16,7 @@ ENV/
 
 # Run logs and test caches
 runs/
+events.jsonl
 .pytest_cache/
 .coverage
 htmlcov/

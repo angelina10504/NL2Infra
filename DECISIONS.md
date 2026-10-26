@@ -24,3 +24,19 @@ lines each, newest first.
   separate `RateLimiter` wired into the graph's guardrails node only.
 - **Environment detected from the prompt text** (deterministic, pre-LLM) so a blocked request still
   spends zero tokens — matching the project's "blocked before inference" guarantee.
+
+## Phase 2 — Events & in-dashboard notifications
+- **Store = JSONL, not SQLite.** Local, zero-dependency, trivially inspectable. Path is
+  `NL2INFRA_EVENTS_FILE` (default `events.jsonl`); tests redirect it per-test via an autouse fixture.
+- **`approval_required` emitted from the pipeline layer, not the approve node.** LangGraph re-runs a
+  node's body on resume, so code before `interrupt()` fires twice. The pipeline emits it exactly once,
+  when `_drive` sees the run pause. The other events (`request_blocked`, `fix_loop_exhausted`,
+  `pr_opened`) are emitted from their graph nodes, which run once. All emits use `emit_event_safe`.
+- **SSE generator lives in `notifications.event_stream` (not the route) and does NOT call
+  `request.is_disconnected()`.** That call consumes the ASGI receive channel and then blocks forever,
+  starving the queue poll. Disconnect is handled by cancellation into `finally`. Making it a plain
+  async generator also lets tests drive it directly (httpx ASGITransport buffers infinite streams).
+- **Notifications UI lives in the FastAPI HTML dashboard** (`templates/index.html`), the natural home
+  for a live bell + toasts via `EventSource`. The Streamlit app stays the run/replay analysis view.
+- **`channels` is a dispatch table** (`CHANNELS`, default `("dashboard",)`). Email/Slack = register one
+  function with `register_channel(...)`; no other code changes. Not implemented now, by design.

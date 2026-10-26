@@ -148,6 +148,75 @@
       color: #fff;
       border-color: #282c34;
     }
+
+    /* --- Notifications: bell, panel, toasts --- */
+    .bell-wrap { position: relative; }
+    .bell-btn {
+      appearance: none; cursor: pointer; position: relative;
+      display: flex; align-items: center; gap: 6px;
+      padding: 8px 14px; border: 1px solid #33322a; border-left: none;
+      background: #201f17; color: #ded9cf;
+      font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+    }
+    .bell-btn:hover { background: #2a281e; }
+    .bell-count {
+      position: absolute; top: -6px; right: -6px; min-width: 18px; height: 18px;
+      padding: 0 4px; border-radius: 9px; background: oklch(0.58 0.20 22); color: #fff;
+      font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 700;
+      display: none; align-items: center; justify-content: center; line-height: 18px; text-align: center;
+    }
+    .bell-count.show { display: inline-flex; }
+    .notif-panel {
+      position: absolute; top: 46px; right: 0; width: 400px; max-height: 70vh; overflow-y: auto;
+      background: #fbfaf7; border: 1px solid #d6d2c8; box-shadow: 0 18px 40px -20px rgba(21,21,15,0.55);
+      z-index: 50; display: none;
+    }
+    .notif-panel.open { display: block; }
+    .notif-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 14px; border-bottom: 1px solid #e3dfd5; position: sticky; top: 0; background: #fbfaf7;
+      font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: #6d6a60;
+    }
+    .notif-head button {
+      appearance: none; cursor: pointer; border: 1px solid #d6d2c8; background: #f2f0eb;
+      font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; text-transform: uppercase; padding: 4px 8px; color: #15150f;
+    }
+    .notif-empty { padding: 22px 14px; color: #6d6a60; font-size: 13px; text-align: center; }
+    .notif-item { padding: 11px 14px; border-bottom: 1px solid #efece4; border-left: 4px solid #a4cafe; }
+    .notif-item.unread { background: #fdfcf9; }
+    .notif-item.read { opacity: 0.62; }
+    .notif-item.sev-critical { border-left-color: #d9534f; }
+    .notif-item.sev-warning  { border-left-color: #f0ad4e; }
+    .notif-item.sev-success  { border-left-color: #28a745; }
+    .notif-item.sev-info     { border-left-color: #4a7fd6; }
+    .notif-item .msg { font-size: 13px; font-weight: 600; color: #15150f; }
+    .notif-item .meta { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; color: #6d6a60; margin-top: 3px; }
+    .notif-actions { display: flex; gap: 8px; margin-top: 8px; }
+    .notif-actions button {
+      appearance: none; cursor: pointer; border: none; padding: 5px 12px;
+      font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-transform: uppercase; font-weight: 600;
+    }
+    .notif-actions .approve { background: #28a745; color: #fff; }
+    .notif-actions .reject { background: #d9534f; color: #fff; }
+    .notif-actions .seen { background: #f2f0eb; color: #15150f; border: 1px solid #d6d2c8 !important; }
+
+    #toast-stack {
+      position: fixed; top: 84px; right: 20px; z-index: 1000;
+      display: flex; flex-direction: column; gap: 10px; width: 340px; pointer-events: none;
+    }
+    .toast {
+      pointer-events: auto; background: #15150f; color: #f7f5f0;
+      border-left: 5px solid #4a7fd6; padding: 12px 14px;
+      box-shadow: 0 14px 30px -16px rgba(0,0,0,0.6);
+      animation: toastIn 0.2s ease; font-size: 13px;
+    }
+    .toast.sev-critical { border-left-color: #d9534f; }
+    .toast.sev-warning  { border-left-color: #f0ad4e; }
+    .toast.sev-success  { border-left-color: #28a745; }
+    .toast.sev-info     { border-left-color: #4a7fd6; }
+    .toast .t-type { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: #a29e93; }
+    .toast .t-msg { margin-top: 3px; font-weight: 600; }
+    @keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
   </style>
 </head>
 <body>
@@ -183,8 +252,26 @@
         <div style="display: flex; align-items: center; padding: 8px 14px; border: 1px solid #33322a; border-left: none; background: #201f17;" id="header-model-label">
           llama-3.3-70b-versatile
         </div>
+
+        <!-- Notifications bell -->
+        <div class="bell-wrap">
+          <button type="button" class="bell-btn" onclick="toggleNotifPanel()" title="Notifications">
+            <i class="fa-solid fa-bell"></i>
+            <span id="bell-count" class="bell-count">0</span>
+          </button>
+          <div id="notif-panel" class="notif-panel">
+            <div class="notif-head">
+              <span>Notifications</span>
+              <button type="button" onclick="markAllRead()">Mark all read</button>
+            </div>
+            <div id="notif-list"><div class="notif-empty">No notifications yet.</div></div>
+          </div>
+        </div>
       </div>
     </header>
+
+    <!-- Toast pop-ups -->
+    <div id="toast-stack"></div>
 
     <!-- Top Tabular Metric Cards -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); border-bottom: 1px solid #d6d2c8; background: linear-gradient(#ffffff, #faf8f4);">
@@ -804,8 +891,116 @@ spec:
     }
   }
 
+  // ------------------------------------------------------------ Notifications
+  let notifEvents = [];   // newest first
+  let notifUnread = 0;
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+      ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function toggleNotifPanel() {
+    const panel = document.getElementById('notif-panel');
+    panel.classList.toggle('open');
+  }
+
+  function updateBell() {
+    const badge = document.getElementById('bell-count');
+    badge.innerText = notifUnread;
+    badge.classList.toggle('show', notifUnread > 0);
+  }
+
+  function renderNotifications() {
+    const list = document.getElementById('notif-list');
+    if (!notifEvents.length) {
+      list.innerHTML = '<div class="notif-empty">No notifications yet.</div>';
+      return;
+    }
+    list.innerHTML = notifEvents.map(e => {
+      const when = (e.timestamp || '').replace('T', ' ').replace('+00:00', ' UTC');
+      let actions = '';
+      if (e.type === 'approval_required' && !e.read) {
+        actions = `<div class="notif-actions">
+          <button class="approve" onclick="decideFromNotif('${e.id}', '${escapeHtml(e.run_id)}', true)">Approve</button>
+          <button class="reject" onclick="decideFromNotif('${e.id}', '${escapeHtml(e.run_id)}', false)">Reject</button>
+        </div>`;
+      } else if (!e.read) {
+        actions = `<div class="notif-actions"><button class="seen" onclick="markRead('${e.id}')">Mark read</button></div>`;
+      }
+      return `<div class="notif-item ${e.read ? 'read' : 'unread'} sev-${escapeHtml(e.severity)}">
+        <div class="msg">${escapeHtml(e.message)}</div>
+        <div class="meta">${escapeHtml(e.type)} · ${escapeHtml(e.run_id || '-')} · ${escapeHtml(when)}</div>
+        ${actions}
+      </div>`;
+    }).join('');
+  }
+
+  function showToast(e) {
+    const stack = document.getElementById('toast-stack');
+    const toast = document.createElement('div');
+    toast.className = 'toast sev-' + e.severity;
+    toast.innerHTML = `<div class="t-type">${escapeHtml(e.type)}</div><div class="t-msg">${escapeHtml(e.message)}</div>`;
+    stack.appendChild(toast);
+    setTimeout(() => toast.remove(), 7000);
+  }
+
+  async function loadNotifications() {
+    try {
+      const res = await fetch('/events?limit=50');
+      const data = await res.json();
+      notifEvents = data.events || [];
+      notifUnread = data.unread || 0;
+      updateBell();
+      renderNotifications();
+    } catch (err) { /* server may be offline in replay/demo mode */ }
+  }
+
+  async function markRead(id) {
+    try { await fetch(`/events/${id}/read`, { method: 'POST' }); } catch (e) {}
+    const ev = notifEvents.find(x => x.id === id);
+    if (ev && !ev.read) { ev.read = true; notifUnread = Math.max(0, notifUnread - 1); }
+    updateBell(); renderNotifications();
+  }
+
+  async function markAllRead() {
+    try { await fetch('/events/read-all', { method: 'POST' }); } catch (e) {}
+    notifEvents.forEach(e => e.read = true);
+    notifUnread = 0;
+    updateBell(); renderNotifications();
+  }
+
+  async function decideFromNotif(eventId, requestId, approved) {
+    try {
+      await fetch('/api/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ request_id: requestId, approved: approved })
+      });
+    } catch (e) {}
+    markRead(eventId);
+  }
+
+  function connectEventStream() {
+    if (!window.EventSource) return;
+    const es = new EventSource('/events/stream');
+    es.onmessage = (msg) => {
+      if (!msg.data || msg.data === '{}') return;
+      let e;
+      try { e = JSON.parse(msg.data); } catch (err) { return; }
+      notifEvents.unshift(e);
+      notifUnread += 1;
+      updateBell();
+      renderNotifications();
+      showToast(e);
+    };
+    es.onerror = () => { /* browser auto-reconnects */ };
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     hljs.highlightAll();
+    loadNotifications();
+    connectEventStream();
   });
 </script>
 </body>

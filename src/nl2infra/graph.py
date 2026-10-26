@@ -14,12 +14,21 @@ from langgraph.types import interrupt
 from contracts import RunState, Violation, CLUSTER_SCOPED_KINDS
 from guardrails import check_guardrails, RateLimiter
 from llm_service import LLMError
+from notifications import emit_event_safe
 from timing import track_time
 from validators import is_tool_crash
 
 logger = logging.getLogger(__name__)
 
 MAX_FIX_ROUNDS = 5
+
+# Severity to raise for each guardrail reason code.
+_BLOCK_SEVERITY = {
+    "injection_attempt": "critical",
+    "unauthorized": "warning",
+    "rate_limited": "warning",
+    "off_topic": "info",
+}
 
 
 def default_services():
@@ -89,6 +98,11 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
             state.status = "rejected"
             state.rejection_reason = reason
             logger.warning("Request %s blocked by guardrails: %s", state.request_id, reason)
+            code = reason.split(":", 1)[0]
+            emit_event_safe(
+                "request_blocked", _BLOCK_SEVERITY.get(code, "warning"), state.request_id,
+                f"Request blocked ({code})", metadata={"reason": reason, "role": state.user_role},
+            )
 
     def plan(state: RunState):
         if state.plan is not None:
@@ -131,6 +145,11 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
             state.rejection_reason = (
                 f"max_fix_rounds: {len(state.violations)} violation(s) remain after {MAX_FIX_ROUNDS} fix rounds"
             )
+            emit_event_safe(
+                "fix_loop_exhausted", "critical", state.request_id,
+                f"Fix loop exhausted: {len(state.violations)} violation(s) remain after {MAX_FIX_ROUNDS} rounds",
+                metadata={"violations": len(state.violations)},
+            )
 
     def fix(state: RunState):
         previous = state.rounds[-2] if len(state.rounds) >= 2 else None
@@ -156,6 +175,10 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
             return
         if isinstance(url, str) and url.startswith(("https://", "http://")):
             state.pr_url = url
+            emit_event_safe(
+                "pr_opened", "success", state.request_id,
+                f"Pull request opened for {environment}", metadata={"pr_url": url, "environment": environment},
+            )
         else:
             state.pr_error = str(url)
 
