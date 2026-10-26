@@ -88,3 +88,17 @@ lines each, newest first.
   "100% / 40 of 40" tiles in the HTML dashboard are flagged as illustrative placeholders.
 - **evaluate.py / charts.py both learned arm D.** Charts use the Agg backend and are tested against
   synthetic logs (no real run needed to prove they render).
+
+## Phase 6 — GitHub Actions CI
+- **One `test` job gates every PR:** ruff (errors only — `E9,F63,F7,F82` — so existing style never
+  fails the build), full pytest, `conftest verify --policy policies` (all 33 Rego tests run together,
+  as they share base fixtures), Checkov on `samples/manifests` (soft-fail — it is a report gate; the
+  Gauntlet is the real enforcer), and an offline `run_benchmark.py --dry-count` smoke test.
+- **The AI reviewer is advisory and comment-only.** A separate `ai-review` job (PR-only,
+  `pull-requests: write`, `contents: read`) runs `.github/scripts/ai_review.py`, which reuses the
+  project's single LLM entry point (`LLMService._call`) to summarise diff risks and posts one comment
+  via `gh`. It never approves or merges, fails soft (exits 0 on any error / missing key), and uses
+  `continue-on-error` so it can never block a PR.
+- **CI badge + full README added** (`angelina10504/NL2Infra`). The README also folds in most of
+  Phase 7's doc asks (Mermaid architecture, quick start, tests, observability, ethics & limits,
+  tier-2 sketch).
