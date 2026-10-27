@@ -26,6 +26,10 @@ htmlcov/
 .idea/
 *.swp
 
+# Claude Code (local only, not pushed)
+CLAUDE.md
+.claude/
+
 # Generated manifests
 nl2infra-manifests/
 
