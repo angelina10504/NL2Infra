@@ -30,9 +30,6 @@ htmlcov/
 CLAUDE.md
 .claude/
 
-# CI workflow (local only, not pushed)
-.github/workflows/
-
 # Generated manifests
 nl2infra-manifests/
 
