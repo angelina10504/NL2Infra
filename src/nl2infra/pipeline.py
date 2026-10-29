@@ -40,7 +40,8 @@ class Pipeline:
             llm, validator, gitops, auto_approve=auto_approve,
             # The paused run is restored from the checkpoint; name the contract types it may rebuild.
             checkpointer=MemorySaver(serde=JsonPlusSerializer(allowed_msgpack_modules=[
-                ("contracts", name) for name in ("Plan", "Resource", "Violation", "RunState")
+                ("contracts", name) for name in
+                ("Plan", "Resource", "Violation", "RunState", "ProjectProfile", "WorkloadType")
             ])),
         )
 
@@ -60,7 +61,8 @@ class Pipeline:
             emit_event_safe(
                 "approval_required", "info", request_id,
                 f"Plan ready for approval: {count} resource(s)",
-                metadata={"plan": state.plan.model_dump() if state.plan else None, "role": state.user_role},
+                metadata={"plan": state.plan.model_dump() if state.plan else None, "role": state.user_role,
+                          "profile": state.profile.model_dump(mode="json") if state.profile else None},
             )
             if request_id not in self._pending_approval:
                 self._pending_approval.add(request_id)
@@ -102,8 +104,13 @@ class Pipeline:
 
     def start(self, prompt: str, role: str, request_id: Optional[str] = None, arm: Optional[str] = None,
               on_step: StepCallback = None, plan: Optional[Plan] = None, bypass_guardrails: bool = False,
-              benchmark: Optional[dict] = None) -> RunState:
-        """Runs until the plan needs approval, or to the end if the run finishes first."""
+              benchmark: Optional[dict] = None, project_aware: bool = False,
+              pasted_files: Optional[dict] = None) -> RunState:
+        """Runs until the plan needs approval, or to the end if the run finishes first.
+
+        Set project_aware=True to run the profiler node (Project-Aware Generation); it is off
+        by default so every existing caller behaves exactly as before.
+        """
         state = RunState(
             request_id=request_id or uuid.uuid4().hex[:8],
             user_role=role,
@@ -118,6 +125,8 @@ class Pipeline:
             plan=plan,
             guardrails_bypassed=bypass_guardrails,
             benchmark=benchmark or {},
+            project_aware=project_aware,
+            pasted_files=pasted_files or {},
         )
         return self._drive(state.request_id, state, on_step)
 

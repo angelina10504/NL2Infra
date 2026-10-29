@@ -12,7 +12,7 @@ from typing import Callable, Dict, List, Optional
 from dotenv import load_dotenv
 from pydantic import ValidationError
 
-from contracts import Plan, Resource, Violation, WORKLOAD_KINDS
+from contracts import Plan, ProjectProfile, Resource, Violation, WORKLOAD_KINDS
 from rules import rules_for_role
 
 load_dotenv()
@@ -261,6 +261,38 @@ class LLMService:
             self.call_log.append(record)
             return _text(response)
 
+    # --------------------------------------------------------------- profile
+
+    def profile(self, prompt: str, files: Dict[str, str], hints: dict, role: str = "developer") -> ProjectProfile:
+        """Returns a validated ProjectProfile. One retry with the error in the prompt, then LLMBadOutput.
+
+        `hints` are the deterministic-scan facts; the prompt tells the model they are authoritative.
+        The profiler layer still lets the scan win on merge, so this is belt-and-suspenders.
+        """
+        files_text = "\n\n".join(f"# {name}\n{body}" for name, body in (files or {}).items()) or "(none)"
+        hints_text = "\n".join(f"- {k}: {v}" for k, v in (hints or {}).items()) or "(none)"
+        base_prompt = _load_prompt_template("profile_prompt.txt").format(
+            prompt=prompt, files=files_text[:4000], hints=hints_text,
+        )
+        llm_prompt = base_prompt
+        error = ""
+        for attempt in (1, 2):
+            parsed = _extract_json_block(self._call(llm_prompt, "profile", attempt=attempt))
+            if not isinstance(parsed, dict):
+                error = "the reply was not a JSON object"
+            else:
+                try:
+                    return ProjectProfile.model_validate(parsed)
+                except ValidationError as e:
+                    error = "; ".join(
+                        f"{'.'.join(str(p) for p in err['loc'])}: {err['msg']}" for err in e.errors()[:8]
+                    )
+            llm_prompt = (
+                f"{base_prompt}\n\nYour previous reply was rejected: {error}\n"
+                "Reply again with only the corrected JSON object."
+            )
+        raise LLMBadOutput(f"profile rejected twice: {error}")
+
     # ------------------------------------------------------------------ plan
 
     def plan(self, prompt: str, role: str) -> Plan:
@@ -292,7 +324,8 @@ class LLMService:
 
     # -------------------------------------------------------------- generate
 
-    def generate_resource(self, resource: Resource, filename: str, role: str) -> str:
+    def generate_resource(self, resource: Resource, filename: str, role: str,
+                          profile: Optional[ProjectProfile] = None) -> str:
         prompt = _load_prompt_template("generate_prompt.txt").format(
             resource_json=resource.model_dump_json(indent=2),
             rules=rules_for_role(role),
@@ -305,16 +338,25 @@ class LLMService:
             if context:
                 prompt += ("\n\nRelevant policies and past approved manifests, retrieved for grounding "
                            "(use them as guidance; still follow the rules above):\n" + context)
+        if profile is not None:
+            # Project-Aware Generation: ground the draft with the type's must-haves + an example.
+            from fit import grounding_block
+            block = grounding_block(profile)
+            if block:
+                prompt += ("\n\nProject-Aware context (follow it as well as the rules above):\n" + block)
         return _extract_yaml(self._call(prompt, "generate", file=filename))
 
-    def generate(self, plan: Plan, role: str) -> Dict[str, str]:
+    def generate(self, plan: Plan, role: str, profile: Optional[ProjectProfile] = None) -> Dict[str, str]:
         """One LLM call per planned resource, one YAML file each.
 
         Each prompt carries the full rule list for the role, the same one benchmark arm B gets.
+        When a ProjectProfile is given (Project-Aware Generation), the prompt is also grounded
+        with the project type's must-haves and a correct example for that type.
         """
         names = plan_filenames(plan)
         return {
-            names[f"{res.type}/{res.name}"]: self.generate_resource(res, names[f"{res.type}/{res.name}"], role)
+            names[f"{res.type}/{res.name}"]: self.generate_resource(
+                res, names[f"{res.type}/{res.name}"], role, profile=profile)
             for res in plan.resources
         }
 

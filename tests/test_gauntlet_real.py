@@ -111,6 +111,23 @@ def test_conftest_loads_the_policies_for_every_role(scan, role):
     assert violations == []
 
 
+# ---------------------------------------------------------------- Rego: fit (Project-Aware)
+
+@needs_conftest
+def test_fit_conftest_flags_a_database_rendered_as_a_deployment(scan):
+    bad_db = "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: pg\n  namespace: dev\n" \
+             "spec:\n  template:\n    spec:\n      containers: [{name: pg, image: postgres:16}]\n"
+    violations = Validators()._run_fit_conftest(scan({"db.yaml": bad_db}), "database", {"db.yaml": "db.yaml"})
+    assert [v.tool for v in violations] == ["opa"]
+    assert "FIT_DATABASE_STATEFULSET" in rule_ids(violations)
+
+
+@needs_conftest
+def test_fit_conftest_passes_a_type_appropriate_manifest(scan):
+    good = open(os.path.join(os.path.dirname(__file__), "..", "examples", "web_app", "deployment.yaml")).read()
+    assert Validators()._run_fit_conftest(scan({"web.yaml": good}), "web_app", {"web.yaml": "web.yaml"}) == []
+
+
 @needs_conftest
 @pytest.mark.parametrize("role,expected", [
     ("junior_dev", ["OPA_NO_PLAINTEXT_SECRET", "OPA_NO_ROOT", "OPA_REQUIRE_CPU_LIMIT", "OPA_REQUIRE_MEM_LIMIT"]),

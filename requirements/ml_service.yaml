@@ -1,0 +1,13 @@
+# Project-Aware Generation: what an ml_service needs. Data only (see src/nl2infra/fit.py).
+workload_type: ml_service
+description: A model-serving / inference service reachable over HTTP.
+kinds:
+  - Deployment
+  - Service
+must_have:
+  - id: resource_limits
+    description: CPU and memory limits on every container (models are resource-hungry).
+  - id: readiness_probe
+    description: A readinessProbe on every container, so traffic waits for the model to load.
+  - id: liveness_probe
+    description: A livenessProbe on every container.

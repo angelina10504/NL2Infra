@@ -16,6 +16,7 @@ from contracts import RunState, Violation, CLUSTER_SCOPED_KINDS
 from guardrails import check_guardrails, RateLimiter
 from llm_service import LLMError
 from notifications import emit_event_safe
+from profiler import build_profile
 from timing import track_time
 from validators import is_tool_crash
 
@@ -105,6 +106,11 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
                 f"Request blocked ({code})", metadata={"reason": reason, "role": state.user_role},
             )
 
+    def profiler(state: RunState):
+        # Project-Aware Generation: work out what kind of project this is before planning.
+        # Deterministic scan + LLM fill, scan wins, unknowns get safe defaults (see profiler.py).
+        state.profile = build_profile(state.user_prompt, state.pasted_files, llm, role=state.user_role)
+
     def plan(state: RunState):
         if state.plan is not None:
             state.plan_source = "shared"  # supplied by the benchmark so every arm is scored against one plan
@@ -124,10 +130,19 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
         state.approved_plan = state.plan.model_copy(deep=True)
 
     def generate(state: RunState):
-        state.files = llm.generate(state.approved_plan, role=state.user_role)
+        # Pass the profile only when project-aware, so the scripted test services (whose
+        # generate() takes just plan/role) are never handed an unexpected argument.
+        if state.profile is not None:
+            state.files = llm.generate(state.approved_plan, role=state.user_role, profile=state.profile)
+        else:
+            state.files = llm.generate(state.approved_plan, role=state.user_role)
 
     def gauntlet(state: RunState):
-        state.violations = validator.validate(state.files, state.approved_plan, role=state.user_role)
+        if state.profile is not None:
+            state.violations = validator.validate(
+                state.files, state.approved_plan, role=state.user_role, profile=state.profile)
+        else:
+            state.violations = validator.validate(state.files, state.approved_plan, role=state.user_role)
         try:
             _metrics.record_round_violations(state.violations)
         except Exception:
@@ -193,6 +208,7 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
 
     workflow = StateGraph(RunState)
     workflow.add_node("guardrails", node("guardrails_time", guardrails))
+    workflow.add_node("profiler", node("profiler_time", profiler))
     workflow.add_node("plan", node("planning_time", plan))
     workflow.add_node("approve", node("approval_time", approve))
     workflow.add_node("generate", node("generation_time", generate))
@@ -210,8 +226,16 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
             return "pull_request"
         return "fix" if state.status == "running" else END
 
+    def after_guardrails(state: RunState):
+        # Only run the profiler when the caller asked for Project-Aware Generation; otherwise
+        # route straight to plan so the node never executes and old behaviour is byte-for-byte.
+        if state.status != "running":
+            return END
+        return "profiler" if state.project_aware else "plan"
+
     workflow.set_entry_point("guardrails")
-    workflow.add_conditional_edges("guardrails", proceed("plan"), {"plan": "plan", END: END})
+    workflow.add_conditional_edges("guardrails", after_guardrails, {"profiler": "profiler", "plan": "plan", END: END})
+    workflow.add_conditional_edges("profiler", proceed("plan"), {"plan": "plan", END: END})
     workflow.add_conditional_edges("plan", proceed("approve"), {"approve": "approve", END: END})
     workflow.add_conditional_edges("approve", proceed("generate"), {"generate": "generate", END: END})
     workflow.add_conditional_edges("generate", proceed("gauntlet"), {"gauntlet": "gauntlet", END: END})

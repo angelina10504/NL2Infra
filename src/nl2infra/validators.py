@@ -556,8 +556,13 @@ class Validators:
 
     # ------------------------------------------------------------------- all
 
-    def validate(self, files: Dict[str, str], plan: Plan, role: str = "junior_dev") -> List[Violation]:
-        """Runs the full Gauntlet: plan conformance, Checkov, Conftest, server dry-run."""
+    def validate(self, files: Dict[str, str], plan: Plan, role: str = "junior_dev", profile=None) -> List[Violation]:
+        """Runs the full Gauntlet: plan conformance, Checkov, Conftest, server dry-run.
+
+        When a ProjectProfile is given (Project-Aware Generation) two more checks run: the
+        deterministic 'fit' must-have conformance, and the Rego 'fit' policy via Conftest. Both
+        emit ordinary, fixable violations that flow through the existing fix loop.
+        """
         timings: Dict[str, float] = {}
 
         def timed(name, func, *args, **kwargs):
@@ -569,6 +574,9 @@ class Validators:
 
         self.last_timings = timings
         violations = timed("plan", self._plan_conformance, files, plan)
+        if profile is not None:
+            import fit  # deferred to avoid an import cycle (fit imports this module)
+            violations.extend(timed("fit", fit.fit_conformance, files, profile))
         resources, _, scannable = parse_files(files)
         self.last_scan = {"files": len(files), "scanned": len(scannable), "resources": len(resources)}
 
@@ -607,5 +615,65 @@ class Validators:
             violations.extend(timed(
                 "dry-run", self._run_kubectl_dry_run, tmpdir, names, planned_namespaces, declared_namespaces
             ))
+            if profile is not None:
+                workload_type = profile.workload_type.value if hasattr(profile.workload_type, "value") else str(profile.workload_type)
+                violations.extend(timed("fit-opa", self._run_fit_conftest, tmpdir, workload_type, names))
 
+        return violations
+
+    # --------------------------------------------------------------- conftest (fit)
+
+    def _run_fit_conftest(self, temp_dir: str, workload_type: str,
+                          names: Optional[Dict[str, str]] = None) -> List[Violation]:
+        """Runs the Rego 'fit' package (policies/fit) in its own namespace, with the declared
+        workload_type passed as data. Checks the objects fit the project type. TOOL_CRASH on any
+        failure to run (consistent with the rest of the Gauntlet)."""
+        names = names or {}
+        bin_path = self.conftest_bin or _resolve_binary("conftest")
+        if not bin_path:
+            return _crash("opa", "Conftest binary not found in PATH or ~/.local/bin.")
+        fit_policy = os.path.join(self.policies_dir, "fit", "policy.rego")
+        if not os.path.isfile(fit_policy):
+            return _crash("opa", f"Fit policy is missing: {fit_policy}")
+
+        # Windows conftest strips the drive letter from --policy/--data (go-getter) and resolves
+        # them against the current drive, so a policy on D: and a temp dir on C: do not mix. Stage
+        # the fit policy and the type data together in one temp dir and pass both relatively, with
+        # cwd set there; the input manifests path is positional and keeps its absolute drive.
+        work_dir = tempfile.mkdtemp(prefix="nl2fit_")
+        try:
+            os.mkdir(os.path.join(work_dir, "policy"))
+            shutil.copy(fit_policy, os.path.join(work_dir, "policy", "policy.rego"))
+            with open(os.path.join(work_dir, "fitdata.json"), "w", encoding="utf-8") as data_file:
+                json.dump({"workload_type": workload_type}, data_file)
+            cmd = [bin_path, "test", "--policy", "policy", "--namespace", "fit",
+                   "--data", "fitdata.json", "--output", "json", "--no-color", temp_dir]
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=work_dir)
+            except subprocess.TimeoutExpired:
+                return _crash("opa", "Conftest (fit) timed out after 60 seconds.")
+            except Exception as e:
+                return _crash("opa", f"Conftest (fit) execution failed: {e}")
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+        parsed = _parse_json_output(proc.stdout or "")
+        if proc.returncode not in (0, 1) or not isinstance(parsed, list):
+            err_msg = (proc.stderr or "").strip() or (proc.stdout or "").strip() or "no output"
+            return _crash("opa", f"Conftest (fit) crashed with exit code {proc.returncode}: {err_msg[:300]}")
+
+        violations: List[Violation] = []
+        for file_res in parsed:
+            if not isinstance(file_res, dict):
+                return _crash("opa", "Conftest (fit) JSON has an unexpected shape.")
+            filename = names.get(os.path.basename(file_res.get("filename") or ""), file_res.get("filename"))
+            for entry in (file_res.get("failures") or []):
+                msg = entry.get("msg", "") if isinstance(entry, dict) else str(entry)
+                tagged = re.match(r"^\[([A-Z0-9_-]+)\]\s*(.*)", msg, re.S)
+                rule_id = tagged.group(1) if tagged else "FIT_RULE_FAILED"
+                message = tagged.group(2) if tagged else msg
+                violations.append(Violation(
+                    tool="opa", rule_id=rule_id, severity="HIGH", file=filename,
+                    message=message or "fit policy violation",
+                ))
         return violations

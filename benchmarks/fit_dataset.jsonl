@@ -1,0 +1,18 @@
+{"id": "web-1", "workload_type": "web_app", "role": "developer", "prompt": "Deploy an nginx web app to dev with 2 replicas"}
+{"id": "web-2", "workload_type": "web_app", "role": "developer", "prompt": "Put up a small website in dev serving our marketing pages"}
+{"id": "web-3", "workload_type": "web_app", "role": "developer", "prompt": "Run a frontend web application in the dev namespace behind a service"}
+{"id": "api-1", "workload_type": "api", "role": "developer", "prompt": "Stand up a REST api for orders in dev on port 8080"}
+{"id": "api-2", "workload_type": "api", "role": "developer", "prompt": "Deploy our fastapi backend service to dev"}
+{"id": "api-3", "workload_type": "api", "role": "developer", "prompt": "Run a grpc api in the dev namespace reachable by other services"}
+{"id": "db-1", "workload_type": "database", "role": "developer", "prompt": "Run a postgres database in dev that keeps its data on disk"}
+{"id": "db-2", "workload_type": "database", "role": "developer", "prompt": "Deploy a mysql database to dev with persistent storage"}
+{"id": "db-3", "workload_type": "database", "role": "developer", "prompt": "Set up a mongodb datastore in the dev namespace"}
+{"id": "cron-1", "workload_type": "cron_job", "role": "developer", "prompt": "Create a cron job in dev that runs a cleanup every night at 2am"}
+{"id": "cron-2", "workload_type": "cron_job", "role": "developer", "prompt": "Schedule a report to run hourly in the dev namespace"}
+{"id": "cron-3", "workload_type": "cron_job", "role": "developer", "prompt": "Run a scheduled backup task periodically in dev"}
+{"id": "worker-1", "workload_type": "queue_worker", "role": "developer", "prompt": "Deploy a celery background worker in dev that consumes the task queue"}
+{"id": "worker-2", "workload_type": "queue_worker", "role": "developer", "prompt": "Run a rabbitmq consumer worker in the dev namespace"}
+{"id": "worker-3", "workload_type": "queue_worker", "role": "developer", "prompt": "Stand up a background worker in dev that processes jobs off kafka"}
+{"id": "ml-1", "workload_type": "ml_service", "role": "developer", "prompt": "Serve an ml model for inference in dev on port 8080"}
+{"id": "ml-2", "workload_type": "ml_service", "role": "developer", "prompt": "Deploy a pytorch model serving service to the dev namespace"}
+{"id": "ml-3", "workload_type": "ml_service", "role": "developer", "prompt": "Run a machine learning inference service in dev behind a service"}

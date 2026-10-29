@@ -1,0 +1,14 @@
+# Project-Aware Generation: what a web_app needs. Data only — the detection code lives in
+# src/nl2infra/fit.py; the kinds and must-have list are read from here, never hardcoded.
+workload_type: web_app
+description: A user-facing web application served over HTTP.
+kinds:
+  - Deployment
+  - Service
+must_have:
+  - id: resource_limits
+    description: CPU and memory limits on every container.
+  - id: readiness_probe
+    description: A readinessProbe on every container, so traffic only arrives when ready.
+  - id: liveness_probe
+    description: A livenessProbe on every container, so a hung pod is restarted.

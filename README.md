@@ -129,6 +129,47 @@ them to the prompt. Embeddings are offline TF-IDF over a FAISS index by default 
 `NL2INFRA_EMBEDDINGS=hf` for sentence-transformers). A retrieval Q&A bot answers *"why was my request
 blocked or changed?"* at `POST /api/why`.
 
+## Project-Aware Generation
+
+Different projects need different Kubernetes objects — a database is a `StatefulSet` with a
+`volumeClaimTemplates`, a scheduled task is a `CronJob`, a web app is a `Deployment` + `Service`
+with probes. Project-Aware Generation makes the pipeline **work out what kind of project it is
+first**, then generate and check YAML that fits that type.
+
+A new **profiler** node runs after guardrails and before planning. It does a **deterministic scan**
+(no AI) of the request and any pasted files (`Dockerfile`, `package.json`, `requirements.txt`,
+`docker-compose.yml`) — `EXPOSE` ports, dependency names (`postgres`, `redis`, `celery`, …),
+`schedule`/`cron` words — then asks the LLM to fill the rest as a JSON `ProjectProfile`. **If the
+scan and the model disagree, the scan wins**, and anything neither supplies lands in `unknowns` with
+a safe default that the plan shows. The LLM stays tool-less.
+
+The per-type rules are **data, not code**: [`requirements/<workload_type>.yaml`](requirements/) lists
+the correct kinds and a must-have list (probes, resource limits, a volume claim, a schedule, …), and
+[`examples/<workload_type>/`](examples/) holds one or two correct manifests used to ground generation.
+The plan shown for approval now includes the detected type, the kinds that will be created, the
+must-haves, and the defaults used for unknowns.
+
+The Gauntlet gains a **fit** layer: a Rego package [`policies/fit`](policies/fit) with per-type rules
+(e.g. a `database` must be a `StatefulSet` with a volume, a `cron_job` must be a `CronJob` with a
+schedule, a `web_app`/`api`/`ml_service` must have readiness and liveness probes — each with a passing
+and a failing test), plus a plan-conformance extension that checks every must-have actually appears in
+the YAML. Fit violations are ordinary, fixable violations that flow through the existing fix loop.
+
+It is **off by default** (every existing path is unchanged); the dashboard turns it on, and the API
+accepts `project_aware` / `pasted_files` on `POST /api/run`.
+
+### Fit benchmark
+
+Six project types × three phrasings, four arms: **A** plain LLM · **B** rules in the prompt ·
+**C** current pipeline · **D** pipeline **+ Project-Aware Generation**. Each run records whether the
+correct Kubernetes kind appeared, must-have coverage (%), Checkov violations, fix rounds and time.
+
+```bash
+python benchmarks/fit_benchmark.py --dry-count                  # offline: shows the call budget
+python benchmarks/fit_benchmark.py --yes --arm all --repeats 3  # real run (needs a key + tools + cluster)
+# -> writes results/fit_benchmark.csv and prints a per-arm summary table
+```
+
 ## Benchmark & evaluation
 
 Four arms, same model and same Gauntlet: **A** plain call · **B** rules in the prompt · **C** full

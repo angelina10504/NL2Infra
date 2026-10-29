@@ -1,0 +1,13 @@
+# Project-Aware Generation: what an api needs. Data only (see src/nl2infra/fit.py).
+workload_type: api
+description: A backend API reachable over HTTP/gRPC by other services or clients.
+kinds:
+  - Deployment
+  - Service
+must_have:
+  - id: resource_limits
+    description: CPU and memory limits on every container.
+  - id: readiness_probe
+    description: A readinessProbe on every container, so traffic only arrives when ready.
+  - id: liveness_probe
+    description: A livenessProbe on every container, so a hung pod is restarted.

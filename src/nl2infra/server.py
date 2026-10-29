@@ -43,6 +43,9 @@ class RunRequest(BaseModel):
     role: str = "junior_dev"
     model: Optional[str] = None
     use_gauntlet: bool = True
+    # Project-Aware Generation: on by default for the dashboard; set false for the old behaviour.
+    project_aware: bool = True
+    pasted_files: Dict[str, str] = {}
 
 
 class ApproveRequest(BaseModel):
@@ -76,10 +79,26 @@ def get_pipeline() -> Pipeline:
     return _pipeline
 
 
+def _profile_view(state: RunState) -> Optional[dict]:
+    """The detected project profile for the plan screen: type, the kinds that will be
+    created, the must-have list, and the safe defaults used for anything unknown."""
+    if state.profile is None:
+        return None
+    try:
+        import fit
+        data = state.profile.model_dump(mode="json")
+        data["expected_kinds"] = fit.expected_kinds(state.profile.workload_type)
+        data["must_have"] = fit.required_must_haves(state.profile)
+        return data
+    except Exception:
+        return state.profile.model_dump(mode="json")
+
+
 def _response(state: RunState, awaiting_approval: bool) -> dict:
     return {
         "request_id": state.request_id,
         "status": "awaiting_approval" if awaiting_approval else state.status,
+        "profile": _profile_view(state),
         "plan": state.plan.model_dump() if state.plan else None,
         "approved_plan": state.approved_plan.model_dump() if state.approved_plan else None,
         "files": state.files or {},
@@ -123,7 +142,8 @@ def _remember_step(step_name: str, state: RunState) -> None:
 def run_pipeline(req: RunRequest):
     """Guardrails and planning. Returns the plan with status 'awaiting_approval'; nothing is generated yet."""
     pipeline = get_pipeline()
-    state = pipeline.start(req.prompt, req.role, on_step=_remember_step)
+    state = pipeline.start(req.prompt, req.role, on_step=_remember_step,
+                           project_aware=req.project_aware, pasted_files=req.pasted_files)
     result = _response(state, pipeline.awaiting_approval(state.request_id))
     result["current_stage"] = "approve" if pipeline.awaiting_approval(state.request_id) else None
     with _live_runs_lock:

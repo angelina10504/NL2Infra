@@ -1,0 +1,8 @@
+# Project-Aware Generation: what a one_time_job needs. Data only (see src/nl2infra/fit.py).
+workload_type: one_time_job
+description: A task that runs once to completion, as a Kubernetes Job.
+kinds:
+  - Job
+must_have:
+  - id: resource_limits
+    description: CPU and memory limits on every container.

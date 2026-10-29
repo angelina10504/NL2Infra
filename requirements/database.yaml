@@ -1,0 +1,14 @@
+# Project-Aware Generation: what a database needs. Data only (see src/nl2infra/fit.py).
+# A database is a StatefulSet with persistent storage, never a plain Deployment.
+workload_type: database
+description: A stateful datastore (postgres, mysql, mongo, redis) that keeps data on disk.
+kinds:
+  - StatefulSet
+  - Service
+must_have:
+  - id: resource_limits
+    description: CPU and memory limits on every container.
+  - id: volume_claim
+    description: A volumeClaimTemplates entry so data survives a restart.
+  - id: readiness_probe
+    description: A readinessProbe on every container.

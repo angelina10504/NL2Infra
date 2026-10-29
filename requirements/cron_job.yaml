@@ -1,0 +1,10 @@
+# Project-Aware Generation: what a cron_job needs. Data only (see src/nl2infra/fit.py).
+workload_type: cron_job
+description: A task that runs on a schedule, as a Kubernetes CronJob.
+kinds:
+  - CronJob
+must_have:
+  - id: resource_limits
+    description: CPU and memory limits on every container.
+  - id: schedule
+    description: A spec.schedule cron expression.

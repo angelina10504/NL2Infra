@@ -1,0 +1,11 @@
+# Project-Aware Generation: what a queue_worker needs. Data only (see src/nl2infra/fit.py).
+# A worker pulls from a queue; it has no inbound traffic, so it needs no Service.
+workload_type: queue_worker
+description: A background worker that consumes a queue (celery, rabbitmq, kafka).
+kinds:
+  - Deployment
+must_have:
+  - id: resource_limits
+    description: CPU and memory limits on every container.
+  - id: liveness_probe
+    description: A livenessProbe on every container, so a stuck worker is restarted.

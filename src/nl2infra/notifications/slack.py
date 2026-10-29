@@ -5,7 +5,10 @@ import json
 import logging
 import os
 import re
-import fcntl
+try:
+    import fcntl  # POSIX-only; used for the cross-process run-file lock below.
+except ImportError:
+    fcntl = None   # Windows has no fcntl; the lock degrades to a no-op (single-process laptop).
 import threading
 import time
 from contextlib import contextmanager
@@ -160,11 +163,13 @@ def _run_file_lock(path: Path):
     lock_path = path.with_suffix(path.suffix + ".slack-lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a", encoding="utf-8") as lock_file:
-        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
         try:
             yield
         finally:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _gitops_service():

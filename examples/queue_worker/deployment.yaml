@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: dev
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: celery-worker
+  template:
+    metadata:
+      labels:
+        app: celery-worker
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: worker
+          image: ghcr.io/acme/worker:3.2.0
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "celery -A app inspect ping"]
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi

@@ -1,3 +1,4 @@
+from enum import Enum
 from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Dict, Optional, Literal
 
@@ -67,6 +68,46 @@ class Plan(BaseModel):
 # Files contract is a simple dictionary: dict[filename, yaml_text]
 Files = Dict[str, str]
 
+
+# --------------------------------------------------------------------------- project profile
+# Project-Aware Generation: the pipeline first works out WHAT KIND of project this is,
+# so it can generate and check the Kubernetes objects that actually fit (a database is not
+# a plain Deployment). The profiler node fills this in; the plan shows it to the human.
+
+class WorkloadType(str, Enum):
+    """The kind of project. Drives which Kubernetes kinds and checks apply."""
+    web_app = "web_app"
+    api = "api"
+    database = "database"
+    cron_job = "cron_job"
+    one_time_job = "one_time_job"
+    queue_worker = "queue_worker"
+    ml_service = "ml_service"
+    static_site = "static_site"
+
+
+class ProjectProfile(BaseModel):
+    """What the profiler worked out about the request. Everything not provided lands in
+    `unknowns` with a safe default, so nothing is ever guessed silently."""
+    workload_type: WorkloadType = Field(description="The kind of project, e.g. web_app, database, cron_job")
+    app_name: str = Field(min_length=1, description="A short DNS-safe name for the app")
+    image: Optional[str] = Field(None, description="Container image, if the request named one")
+    port: Optional[int] = Field(None, ge=1, le=65535, description="Container port, if known")
+    needs_storage: bool = Field(False, description="True if the workload keeps data on disk (PVC/volumeClaim)")
+    needs_public_access: bool = Field(False, description="True if it should be reachable from outside (Service/Ingress)")
+    secrets_needed: List[str] = Field(default_factory=list, description="Names of secrets the app expects")
+    env_vars: List[str] = Field(default_factory=list, description="Names of environment variables the app expects")
+    size: Literal["small", "medium", "large"] = Field("small", description="Rough sizing for resource requests/limits")
+    unknowns: List[str] = Field(
+        default_factory=list,
+        description="Fields not provided in the request; each got a safe default that the plan shows.",
+    )
+
+    @field_validator("app_name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        return value.strip()
+
 class Violation(BaseModel):
     tool: Literal["checkov", "opa", "dry-run", "plan"] = Field(description="The tool that found the violation")
     rule_id: str = Field(min_length=1, description="The specific rule ID that failed")
@@ -81,6 +122,10 @@ class RunState(BaseModel):
     user_role: str
     user_prompt: str
     user_id: str = "anonymous"   # who submitted; used for per-user rate limiting
+    # Project-Aware Generation (off unless the caller asks for it, so old behaviour is unchanged).
+    project_aware: bool = False
+    pasted_files: Dict[str, str] = {}      # optional Dockerfile/package.json/etc. the user pasted
+    profile: Optional[ProjectProfile] = None
     plan: Optional[Plan] = None
     files: Optional[Files] = None
     violations: List[Violation] = []

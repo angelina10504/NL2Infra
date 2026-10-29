@@ -1,0 +1,11 @@
+# Project-Aware Generation: what a static_site needs. Data only (see src/nl2infra/fit.py).
+workload_type: static_site
+description: A static website (HTML/CSS/JS) served by a small web server.
+kinds:
+  - Deployment
+  - Service
+must_have:
+  - id: resource_limits
+    description: CPU and memory limits on every container.
+  - id: readiness_probe
+    description: A readinessProbe on every container.

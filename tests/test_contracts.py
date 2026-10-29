@@ -1,5 +1,5 @@
 import pytest
-from contracts import Resource, Plan, Violation, RunState
+from contracts import Resource, Plan, Violation, RunState, ProjectProfile, WorkloadType
 
 def test_resource_model():
     res = Resource(type="Deployment", name="web", namespace="default", spec={"image": "nginx:1.25", "replicas": 2})
@@ -75,3 +75,41 @@ def test_planned_images_and_replicas():
 def test_unknown_severity_is_rejected():
     with pytest.raises(ValueError):
         Violation(tool="checkov", rule_id="X", severity="banana", message="m")
+
+
+# --------------------------------------------------------------------------- ProjectProfile
+
+def test_project_profile_defaults():
+    # Only the required fields; everything else should get a safe default.
+    p = ProjectProfile(workload_type="web_app", app_name="  shop  ")
+    assert p.workload_type is WorkloadType.web_app
+    assert p.app_name == "shop"            # trimmed
+    assert p.image is None
+    assert p.port is None
+    assert p.needs_storage is False
+    assert p.needs_public_access is False
+    assert p.secrets_needed == [] and p.env_vars == [] and p.unknowns == []
+    assert p.size == "small"
+
+
+def test_project_profile_full_round_trip():
+    p = ProjectProfile(
+        workload_type="database", app_name="pg", image="postgres:16", port=5432,
+        needs_storage=True, needs_public_access=False, secrets_needed=["pg-password"],
+        env_vars=["POSTGRES_DB"], size="medium", unknowns=["port assumed 5432"],
+    )
+    restored = ProjectProfile.model_validate_json(p.model_dump_json())
+    assert restored.workload_type is WorkloadType.database
+    assert restored.needs_storage is True
+    assert restored.secrets_needed == ["pg-password"]
+
+
+@pytest.mark.parametrize("bad", [
+    {"workload_type": "banana", "app_name": "x"},     # not a known type
+    {"workload_type": "web_app", "app_name": ""},      # empty name
+    {"workload_type": "web_app", "app_name": "x", "port": 70000},  # port out of range
+    {"workload_type": "web_app", "app_name": "x", "size": "huge"}, # not a known size
+])
+def test_project_profile_rejects_bad_input(bad):
+    with pytest.raises(ValueError):
+        ProjectProfile(**bad)

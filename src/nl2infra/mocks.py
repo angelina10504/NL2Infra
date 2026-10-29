@@ -1,5 +1,5 @@
 from typing import Dict, List, Optional
-from contracts import Plan, Resource, Violation
+from contracts import Plan, ProjectProfile, Resource, Violation, WorkloadType
 
 
 class MockLLMService:
@@ -10,13 +10,22 @@ class MockLLMService:
     def drain_calls(self) -> List[dict]:
         return []
 
+    def profile(self, prompt: str, files: Dict[str, str], hints: dict, role: str = "developer") -> ProjectProfile:
+        # Canned profile: honour any workload_type the deterministic scan already found.
+        return ProjectProfile(
+            workload_type=hints.get("workload_type", WorkloadType.web_app),
+            app_name="mock-app",
+            image="nginx:1.27-alpine",
+            port=hints.get("port", 80),
+        )
+
     def plan(self, prompt: str, role: str) -> Plan:
         return Plan(resources=[
             Resource(type="Deployment", name="mock-deploy", namespace="dev", spec={"image": "nginx:1.27-alpine", "replicas": 1}),
             Resource(type="Service", name="mock-svc", namespace="dev", spec={"port": 80})
         ])
 
-    def generate(self, plan: Plan, role: str = "junior_dev") -> Dict[str, str]:
+    def generate(self, plan: Plan, role: str = "junior_dev", profile: Optional[ProjectProfile] = None) -> Dict[str, str]:
         return {
             "deployment-mock-deploy.yaml": (
                 "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: mock-deploy\n  namespace: dev\n"
@@ -46,7 +55,7 @@ class MockValidators:
     def skipped_checks(self) -> List[str]:
         return []
 
-    def validate(self, files: Dict[str, str], plan: Plan, role: str = "junior_dev") -> List[Violation]:
+    def validate(self, files: Dict[str, str], plan: Plan, role: str = "junior_dev", profile=None) -> List[Violation]:
         # Return a fake violation on the first try, then empty
         if not self.called:
             self.called = True
