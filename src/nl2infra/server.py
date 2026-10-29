@@ -3,8 +3,9 @@ import sys
 import uuid
 import json
 import logging
+import threading
 from typing import Optional, Dict, Any
-from fastapi import FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -18,6 +19,7 @@ from guardrails import check_guardrails
 from pipeline import Pipeline
 from storage import load_runs
 import notifications
+from notifications import slack as slack_notifications
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from fastapi.responses import Response
 
@@ -62,6 +64,8 @@ async def serve_index():
 
 
 _pipeline = None
+_live_runs: Dict[str, dict] = {}
+_live_runs_lock = threading.Lock()
 
 
 def get_pipeline() -> Pipeline:
@@ -77,15 +81,41 @@ def _response(state: RunState, awaiting_approval: bool) -> dict:
         "request_id": state.request_id,
         "status": "awaiting_approval" if awaiting_approval else state.status,
         "plan": state.plan.model_dump() if state.plan else None,
+        "approved_plan": state.approved_plan.model_dump() if state.approved_plan else None,
         "files": state.files or {},
         "violations": [v.model_dump() for v in state.violations],
-        "rounds": state.rounds,
+        "role": state.user_role,
+        "model": state.model,
+        "rounds": state.rounds or [],
         "iterations": state.iterations,
         "pr_url": state.pr_url,
         "pr_error": state.pr_error,
+        "deploy": state.deploy,
         "metrics": state.metrics,
         "rejection_reason": state.rejection_reason
     }
+
+
+def _live_snapshot(state: RunState, current: Optional[str] = None, message: str = "") -> dict:
+    data = _response(state, False)
+    data["current_stage"] = current
+    data["message"] = message
+    data["status"] = state.status
+    return data
+
+
+def _remember_step(step_name: str, state: RunState) -> None:
+    """Keep a small request-time snapshot so the browser can follow a running graph."""
+    try:
+        import ui_data
+        snapshot = state.model_dump()
+        current, message = ui_data.live_position(step_name, snapshot)
+        if step_name == "pull_request":
+            current, message = "deploy", "Waiting for pull request merge"
+    except Exception:
+        current, message = step_name, "In progress"
+    with _live_runs_lock:
+        _live_runs[state.request_id] = _live_snapshot(state, current, message)
 
 
 @app.post("/api/run")
@@ -93,8 +123,12 @@ def _response(state: RunState, awaiting_approval: bool) -> dict:
 def run_pipeline(req: RunRequest):
     """Guardrails and planning. Returns the plan with status 'awaiting_approval'; nothing is generated yet."""
     pipeline = get_pipeline()
-    state = pipeline.start(req.prompt, req.role)
-    return _response(state, pipeline.awaiting_approval(state.request_id))
+    state = pipeline.start(req.prompt, req.role, on_step=_remember_step)
+    result = _response(state, pipeline.awaiting_approval(state.request_id))
+    result["current_stage"] = "approve" if pipeline.awaiting_approval(state.request_id) else None
+    with _live_runs_lock:
+        _live_runs[state.request_id] = result
+    return result
 
 
 @app.post("/api/approve")
@@ -102,10 +136,90 @@ def approve_plan(req: ApproveRequest):
     """The user's decision on the plan. On approval the run continues to the end."""
     pipeline = get_pipeline()
     try:
-        state = pipeline.resume(req.request_id, approved=req.approved)
+        if not pipeline.awaiting_approval(req.request_id):
+            raise ValueError(f"run {req.request_id} is not waiting for approval")
+        state = pipeline.state(req.request_id)
+        if not req.approved:
+            result = pipeline.resume(req.request_id, approved=False)
+            payload = _response(result, False)
+            payload["current_stage"] = None
+            with _live_runs_lock:
+                _live_runs[req.request_id] = payload
+            return payload
+        with _live_runs_lock:
+            _live_runs[req.request_id] = _live_snapshot(state, "generate", "Starting generation")
+
+        def continue_run():
+            try:
+                result = pipeline.resume(req.request_id, approved=True, on_step=_remember_step)
+                payload = _response(result, False)
+                payload["current_stage"] = None
+                with _live_runs_lock:
+                    _live_runs[req.request_id] = payload
+            except Exception as error:
+                logger.exception("Run continuation failed: %s", req.request_id)
+                with _live_runs_lock:
+                    current = _live_runs.get(req.request_id, {})
+                    current.update(status="escalated", current_stage=None, error=str(error))
+                    _live_runs[req.request_id] = current
+
+        threading.Thread(target=continue_run, name=f"nl2infra-{req.request_id}", daemon=True).start()
+        return {"request_id": req.request_id, "status": "running", "current_stage": "generate"}
     except ValueError as error:
         return JSONResponse({"error": str(error)}, status_code=409)
-    return _response(state, False)
+
+
+@app.get("/api/run/{request_id}")
+async def get_live_run(request_id: str):
+    with _live_runs_lock:
+        result = _live_runs.get(request_id)
+    if result is None:
+        return JSONResponse({"error": "run not found"}, status_code=404)
+    return result
+
+
+def guardrail_measurements() -> dict:
+    """Evaluate the checked-in datasets through the same guardrail function as evaluate.py."""
+    root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    from contracts import RunState
+    from guardrails import check_guardrails
+
+    def load_rows(filename):
+        path = os.path.join(root, "benchmarks", filename)
+        with open(path, encoding="utf-8") as file:
+            return [json.loads(line) for line in file if line.strip()]
+
+    try:
+        adversarial = load_rows("adversarial.jsonl")
+        legitimate = load_rows("correctness.jsonl")
+        refused_adversarial = sum(bool(check_guardrails(RunState(
+            request_id=row["id"], user_role=row["role"], user_prompt=row["prompt"], model="none")))
+            for row in adversarial)
+        refused_legitimate = sum(bool(check_guardrails(RunState(
+            request_id=row["id"], user_role=row["role"], user_prompt=row["prompt"], model="none")))
+            for row in legitimate)
+        return {"adversarial_refused": refused_adversarial, "adversarial_total": len(adversarial),
+                "legitimate_false_refused": refused_legitimate, "legitimate_total": len(legitimate)}
+    except (OSError, ValueError, KeyError, TypeError):
+        return {"adversarial_refused": None, "adversarial_total": None,
+                "legitimate_false_refused": None, "legitimate_total": None}
+
+
+@app.get("/api/guardrail-measurements")
+async def get_guardrail_measurements():
+    return guardrail_measurements()
+
+
+@app.get("/api/models")
+async def get_models():
+    """Expose the model configured for this server, without inventing alternatives."""
+    configured = os.environ.get("MODEL_NAME")
+    if not configured:
+        try:
+            configured = getattr(get_pipeline().llm, "model_name", None)
+        except Exception:
+            configured = None
+    return {"models": [configured] if configured else ["Default model"]}
 
 
 @app.post("/api/guardrail-compare")
@@ -276,6 +390,24 @@ async def mark_all_events_read():
 async def stream_events():
     """Server-Sent Events: pushes each new event to the browser for live toasts."""
     return StreamingResponse(notifications.event_stream(), media_type="text/event-stream")
+
+
+@app.post("/slack/interactions")
+async def slack_interactions(request: Request, background_tasks: BackgroundTasks):
+    """Authenticate Slack's raw request body, acknowledge, and defer GitHub work."""
+    body = await request.body()
+    timestamp = request.headers.get("X-Slack-Request-Timestamp")
+    signature = request.headers.get("X-Slack-Signature")
+    secret = os.environ.get("SLACK_SIGNING_SECRET", "")
+    if not slack_notifications.verify_signature(secret, timestamp or "", body, signature or ""):
+        return Response(status_code=401)
+    try:
+        payload = slack_notifications.parse_interaction_body(body)
+    except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
+        # A validly signed malformed payload is acknowledged so Slack does not retry it.
+        return Response(status_code=200)
+    background_tasks.add_task(slack_notifications.process_interaction, payload)
+    return Response(status_code=200)
 
 
 @app.get("/api/cluster")

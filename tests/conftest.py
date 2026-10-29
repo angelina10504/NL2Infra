@@ -16,6 +16,7 @@ for p in [root_dir, src_dir]:
 def _isolate_events(tmp_path, monkeypatch):
     """Point the notifications store at a per-test file so emits never pollute a shared log."""
     monkeypatch.setenv("NL2INFRA_EVENTS_FILE", str(tmp_path / "events.jsonl"))
+    monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
     import notifications
     notifications.reset_for_tests()
     yield

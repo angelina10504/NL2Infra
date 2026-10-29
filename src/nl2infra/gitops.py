@@ -1,6 +1,7 @@
 import os
 import logging
 from typing import Dict, Optional
+from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -102,3 +103,32 @@ class GitOpsService:
                 f.write(content)
 
         return f"file://{local_dir} (Local GitOps simulated: set GITHUB_TOKEN and GITHUB_REPO in .env for real PRs)"
+
+    def _pull_request(self, pr_url: str):
+        """Resolve a PR URL only inside this service's configured GitHub repository."""
+        if not self.token or not self.token.strip():
+            raise RuntimeError("GITHUB_TOKEN is required for pull request actions")
+        parsed = urlparse(pr_url)
+        pieces = [part for part in parsed.path.strip("/").split("/") if part]
+        if parsed.scheme != "https" or parsed.hostname != "github.com" or len(pieces) != 4 or pieces[2] != "pull":
+            raise ValueError("invalid GitHub pull request URL")
+        owner_repo = "/".join(pieces[:2])
+        if owner_repo.casefold() != self.repo_name.casefold():
+            raise ValueError("pull request is outside the configured manifests repository")
+        try:
+            number = int(pieces[3])
+        except ValueError as error:
+            raise ValueError("invalid GitHub pull request number") from error
+        from github import Github
+        repo = Github(self.token).get_repo(self.repo_name)
+        return repo.get_pull(number)
+
+    def merge_pull_request(self, pr_url: str) -> None:
+        """Merge a reviewed PR; never silently fall back to a local simulation."""
+        result = self._pull_request(pr_url).merge()
+        if not getattr(result, "merged", False):
+            raise RuntimeError(getattr(result, "message", "GitHub did not merge the pull request"))
+
+    def close_pull_request(self, pr_url: str) -> None:
+        """Close a declined PR in the configured manifests repository."""
+        self._pull_request(pr_url).edit(state="closed")

@@ -4,9 +4,8 @@ An event is a small record (id, timestamp, type, severity, run_id, message, read
 metadata). `emit_event` persists it to a JSONL store and publishes it to any live
 Server-Sent-Events subscribers, so the dashboard shows alerts in real time.
 
-Design note: `channels` is a pluggable dispatch table. Today only the built-in
-"dashboard" channel exists (store + live push). Email or Slack can be added later by
-registering one function with `register_channel("email", fn)` — no other code changes.
+Design note: `channels` is a pluggable dispatch table. The dashboard and Slack are
+built in; additional channels can be registered with `register_channel`.
 """
 import asyncio
 import json
@@ -25,6 +24,8 @@ EVENT_TYPES = {
     "fix_loop_exhausted",
     "pr_opened",
     "pr_merged",
+    "pr_declined",
+    "pr_approval_failed",
     "deploy_succeeded",
     "deploy_failed",
     "high_failure_rate",
@@ -32,7 +33,7 @@ EVENT_TYPES = {
 
 SEVERITIES = {"info", "warning", "critical", "success"}
 
-DEFAULT_CHANNELS = ("dashboard",)
+DEFAULT_CHANNELS = ("dashboard", "slack")
 
 
 def _now_iso() -> str:
@@ -157,7 +158,15 @@ def _dashboard_channel(event: dict) -> None:
     _broker.publish(event)
 
 
-CHANNELS: Dict[str, Callable[[dict], None]] = {"dashboard": _dashboard_channel}
+def _slack_channel(event: dict) -> None:
+    from .slack import slack_channel
+    slack_channel(event)
+
+
+CHANNELS: Dict[str, Callable[[dict], None]] = {
+    "dashboard": _dashboard_channel,
+    "slack": _slack_channel,
+}
 
 
 def register_channel(name: str, handler: Callable[[dict], None]) -> None:

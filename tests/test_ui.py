@@ -4,6 +4,7 @@ No LLM calls and no cluster: live runs use MOCK_MODE=true and replay reads saved
 """
 import json
 import os
+import re
 
 import pytest
 
@@ -123,6 +124,16 @@ def test_default_file_is_the_first_with_violations_then_the_first_changed():
     assert ui.default_file(names, [violation("X", file="configmap.yaml")], ["service.yaml"]) == "configmap.yaml"
     assert ui.default_file(names, [], []) == "deployment.yaml"
     assert ui.default_file(names, [violation("X", file=None)], []) == "deployment.yaml"
+
+
+def test_dashboard_has_no_hardcoded_percentage_metrics():
+    template = os.path.join(ROOT, "src", "nl2infra", "templates", "index.html")
+    with open(template, encoding="utf-8") as source:
+        markup = source.read()
+    visible_text = re.sub(r"<style\b[^>]*>.*?</style>|<script\b[^>]*>.*?</script>", "", markup,
+                          flags=re.IGNORECASE | re.DOTALL)
+    visible_text = re.sub(r"<[^>]+>", "", visible_text)
+    assert re.search(r"\b\d+(?:\.\d+)?\s*%", visible_text) is None
 
 
 def test_difference_only_drops_the_instruction_to_the_fixer():
