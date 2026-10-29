@@ -13,9 +13,9 @@ from fastapi.testclient import TestClient
 
 
 @pytest.fixture
-def client():
+def client(team_client):
     import server
-    return TestClient(server.app)
+    return team_client()
 
 
 # ------------------------------------------------------------------ emit
@@ -140,12 +140,12 @@ def test_sse_endpoint_is_registered_as_event_stream():
     assert route is not None
 
 
-def test_api_run_emits_approval_required_over_http(monkeypatch):
+def test_api_run_emits_approval_required_over_http(monkeypatch, team_client):
     """The real server path: POST /api/run pauses for approval and the bell feed shows it."""
     monkeypatch.setenv("MOCK_MODE", "true")
     import server
     server._pipeline = None  # rebuild with mock services under this test's events store
-    client = TestClient(server.app)
+    client = team_client("developer")
     run = client.post("/api/run", json={"prompt": "Deploy nginx to dev", "role": "developer"}).json()
     assert run["status"] == "awaiting_approval"
     feed = client.get("/events").json()

@@ -208,6 +208,18 @@ def _actor(payload: dict) -> str:
     return str(user.get("username") or user.get("name") or user.get("id") or "Slack user")
 
 
+def _deny_interaction(response_url: str) -> None:
+    """Tell only the clicking user; preserve the shared message and its buttons."""
+    parsed = urlparse(response_url or "")
+    if parsed.scheme != "https" or parsed.hostname != "hooks.slack.com":
+        return
+    try:
+        _post_json(response_url, {"response_type": "ephemeral", "replace_original": False,
+                                 "text": "Only an active NL2Infra admin with a linked Slack identity may review this PR."})
+    except Exception:
+        logger.warning("Slack permission response could not be delivered")
+
+
 def _process_interaction(payload: dict, run_dir: str | None = None) -> None:
     """Apply one verified button action and persist the terminal decision once."""
     run_dir = run_dir or os.environ.get("NL2INFRA_RUNS_DIR", "runs")
@@ -218,10 +230,38 @@ def _process_interaction(payload: dict, run_dir: str | None = None) -> None:
     action_id = action.get("action_id")
     request_id = str(action.get("value") or "")
     response_url = str(payload.get("response_url") or "")
-    actor = _actor(payload)
+    import auth
+    user = auth.slack_admin(str((payload.get("team") or {}).get("id") or ""),
+                            str((payload.get("user") or {}).get("id") or ""))
+    if not user:
+        _deny_interaction(response_url)
+        return
+    actor = user["login"] or user["github_id"]
     requested_outcome = "approved" if action_id == "approve_merge" else "declined" if action_id == "decline_pr" else ""
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request_id) or not requested_outcome:
         _update_original(response_url, "failed", actor)
+        return
+
+    _apply_decision(request_id, requested_outcome, user["github_id"], actor,
+                    run_dir, response_url, "Slack")
+
+
+def review_from_dashboard(request_id: str, approved: bool, github_id: str, run_dir: str) -> None:
+    """Recheck membership in the background, after the HTTP request was acknowledged."""
+    import auth
+    user = auth.member(github_id)
+    if not user or user["role"] != "admin":
+        return
+    _apply_decision(request_id, "approved" if approved else "declined", github_id,
+                    user["login"] or github_id, run_dir, "", "dashboard")
+
+
+def _apply_decision(request_id: str, requested_outcome: str, github_id: str, actor: str,
+                    run_dir: str, response_url: str, source: str) -> None:
+    import auth
+    user = auth.member(github_id)
+    if not user or user["role"] != "admin":
+        _deny_interaction(response_url)
         return
 
     path = _run_path(request_id, run_dir)
@@ -238,11 +278,18 @@ def _process_interaction(payload: dict, run_dir: str | None = None) -> None:
             _update_original(response_url, _PROCESSING, actor)
             return
 
-        reason = f"Declined via Slack by {actor}" if requested_outcome == "declined" else ""
+        final_violations = ((run.get("rounds") or [{}])[-1]).get("violations", run.get("violations", []))
+        if run.get("status") != "passed" or final_violations:
+            _update_original(response_url, "failed", actor)
+            return
+
+        reason = f"Declined via {source} by {actor}" if requested_outcome == "declined" else ""
         record = {
             "outcome": _PROCESSING,
             "requested_outcome": requested_outcome,
             "actor": actor,
+            "actor_id": github_id,
+            "source": source,
             "reason": reason,
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         }
@@ -250,6 +297,10 @@ def _process_interaction(payload: dict, run_dir: str | None = None) -> None:
         _write_run(path, run)
 
     try:
+        # Permission changes take effect even while an action is queued.
+        current = auth.member(github_id)
+        if not current or current["role"] != "admin":
+            raise PermissionError("Admin permission was revoked")
         pr_url = run.get("pr_url")
         if not isinstance(pr_url, str) or not pr_url.startswith("https://"):
             raise ValueError("run has no public pull request URL")

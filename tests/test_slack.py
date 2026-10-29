@@ -12,6 +12,14 @@ import notifications
 from notifications import slack
 
 
+@pytest.fixture(autouse=True)
+def linked_admin():
+    import auth
+    with auth.database() as db:
+        db.execute("INSERT INTO members(github_id,login,role,slack_team_id,slack_user_id) "
+                   "VALUES ('1','demo.user','admin','T123','U123')")
+
+
 def _signed(body: bytes, secret="test-secret", timestamp=None):
     timestamp = str(int(time.time()) if timestamp is None else timestamp)
     base = b"v0:" + timestamp.encode() + b":" + body
@@ -22,6 +30,7 @@ def _signed(body: bytes, secret="test-secret", timestamp=None):
 def _interaction(action_id="approve_merge", request_id="run-123", actor="demo.user"):
     return {
         "type": "block_actions",
+        "team": {"id": "T123"},
         "user": {"id": "U123", "username": actor},
         "actions": [{"action_id": action_id, "value": request_id}],
         "response_url": "https://hooks.slack.com/actions/test",

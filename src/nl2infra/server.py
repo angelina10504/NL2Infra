@@ -4,10 +4,12 @@ import uuid
 import json
 import logging
 import threading
-from typing import Optional, Dict, Any
-from fastapi import BackgroundTasks, FastAPI, Request
+import hmac
+import re
+from pathlib import Path
+from typing import Optional, Dict
+from fastapi import BackgroundTasks, FastAPI, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # Ensure src and root are in python path
@@ -17,9 +19,9 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from contracts import RunState, Plan, Resource, Violation
 from guardrails import check_guardrails
 from pipeline import Pipeline
-from storage import load_runs
 import notifications
 from notifications import slack as slack_notifications
+import auth
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from fastapi.responses import Response
 
@@ -27,20 +29,38 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="NL2Infra Enterprise Studio", version="1.0.0")
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.include_router(auth.router)
+
+
+@app.middleware("http")
+async def project_access(request: Request, call_next):
+    path = request.url.path
+    protected = path.startswith(("/api/", "/events", "/ask")) or path == "/alerts/webhook"
+    if protected and path != "/api/session":
+        user = auth.session(request.cookies.get(auth.SESSION_COOKIE, ""))
+        if not user:
+            return JSONResponse({"error": "Sign in with an invited GitHub account"}, status_code=401)
+        request.state.member = user
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            csrf = request.headers.get("X-CSRF-Token", "")
+            if not hmac.compare_digest(csrf.encode(), user["csrf"].encode()):
+                return JSONResponse({"error": "Missing or invalid CSRF token"}, status_code=403)
+            if user["role"] == "viewer" and path not in ("/api/logout", "/api/why") and not path.startswith("/events"):
+                return JSONResponse({"error": "Viewers have read-only project access"}, status_code=403)
+    try:
+        response = await call_next(request)
+    finally:
+        if path == "/auth/callback":
+            # Avoid recording OAuth codes in Uvicorn's access log.
+            request.scope["query_string"] = b""
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 TEMPLATE_PATH = os.path.join(os.path.dirname(__file__), "templates", "index.html")
 
 
 class RunRequest(BaseModel):
     prompt: str
-    role: str = "junior_dev"
     model: Optional[str] = None
     use_gauntlet: bool = True
     # Project-Aware Generation: on by default for the dashboard; set false for the old behaviour.
@@ -55,7 +75,6 @@ class ApproveRequest(BaseModel):
 
 class GuardrailCompareRequest(BaseModel):
     question: str
-    role: str = "junior_dev"
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -75,7 +94,7 @@ def get_pipeline() -> Pipeline:
     # One pipeline per server process: it holds the runs that are waiting for approval.
     global _pipeline
     if _pipeline is None:
-        _pipeline = Pipeline(auto_approve=False)
+        _pipeline = Pipeline(auto_approve=False, run_dir=os.environ.get("NL2INFRA_RUNS_DIR", "runs"))
     return _pipeline
 
 
@@ -111,7 +130,10 @@ def _response(state: RunState, awaiting_approval: bool) -> dict:
         "pr_error": state.pr_error,
         "deploy": state.deploy,
         "metrics": state.metrics,
-        "rejection_reason": state.rejection_reason
+        "rejection_reason": state.rejection_reason,
+        "submitted_by": auth.owner(state.request_id),
+        "user_prompt": state.user_prompt,
+        "started_at": state.started_at,
     }
 
 
@@ -139,10 +161,13 @@ def _remember_step(step_name: str, state: RunState) -> None:
 
 @app.post("/api/run")
 @app.post("/ask")
-def run_pipeline(req: RunRequest):
+def run_pipeline(req: RunRequest, request: Request):
     """Guardrails and planning. Returns the plan with status 'awaiting_approval'; nothing is generated yet."""
+    user = auth.require_role(request, "developer", "admin")
     pipeline = get_pipeline()
-    state = pipeline.start(req.prompt, req.role, on_step=_remember_step,
+    request_id = uuid.uuid4().hex
+    auth.record_owner(request_id, user["github_id"])
+    state = pipeline.start(req.prompt, user["role"], request_id=request_id, on_step=_remember_step,
                            project_aware=req.project_aware, pasted_files=req.pasted_files)
     result = _response(state, pipeline.awaiting_approval(state.request_id))
     result["current_stage"] = "approve" if pipeline.awaiting_approval(state.request_id) else None
@@ -152,8 +177,11 @@ def run_pipeline(req: RunRequest):
 
 
 @app.post("/api/approve")
-def approve_plan(req: ApproveRequest):
+def approve_plan(req: ApproveRequest, request: Request):
     """The user's decision on the plan. On approval the run continues to the end."""
+    user = auth.require_role(request, "developer", "admin")
+    if auth.owner(req.request_id) != user["github_id"]:
+        raise HTTPException(403, "You may only approve or reject your own plan")
     pipeline = get_pipeline()
     try:
         if not pipeline.awaiting_approval(req.request_id):
@@ -191,11 +219,40 @@ def approve_plan(req: ApproveRequest):
 
 @app.get("/api/run/{request_id}")
 async def get_live_run(request_id: str):
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request_id):
+        raise HTTPException(404, "Run not found")
     with _live_runs_lock:
         result = _live_runs.get(request_id)
+    saved = slack_notifications._read_run(request_id, get_pipeline().run_dir)
+    if result is None and saved:
+        result = saved
     if result is None:
         return JSONResponse({"error": "run not found"}, status_code=404)
-    return result
+    return {**result, "submitted_by": auth.owner(request_id),
+            "slack_approval": (saved or {}).get("slack_approval")}
+
+
+class PRReviewRequest(BaseModel):
+    request_id: str
+    approved: bool
+
+
+@app.post("/api/pr/review")
+def review_pr(req: PRReviewRequest, request: Request, background_tasks: BackgroundTasks):
+    user = auth.require_role(request, "admin")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", req.request_id):
+        raise HTTPException(404, "Run not found")
+    run = slack_notifications._read_run(req.request_id, get_pipeline().run_dir)
+    if not run:
+        raise HTTPException(404, "Run not found")
+    prior = run.get("slack_approval") or {}
+    if prior.get("outcome"):
+        return {"outcome": prior["outcome"]}
+    if run.get("status") != "passed" or not str(run.get("pr_url", "")).startswith("https://github.com/"):
+        raise HTTPException(409, "This run has no passed pull request to review")
+    background_tasks.add_task(slack_notifications.review_from_dashboard, req.request_id,
+                              req.approved, user["github_id"], get_pipeline().run_dir)
+    return {"outcome": "processing"}
 
 
 def guardrail_measurements() -> dict:
@@ -244,13 +301,15 @@ async def get_models():
 
 @app.post("/api/guardrail-compare")
 @app.post("/ask/guardrail-compare")
-async def guardrail_compare(req: GuardrailCompareRequest):
+async def guardrail_compare(req: GuardrailCompareRequest, request: Request):
+    user = auth.require_role(request, "developer", "admin")
+    role = user["role"]
     question_lower = req.question.lower()
 
     # Check guardrails
     state = RunState(
         request_id="eval-" + str(uuid.uuid4())[:6],
-        user_role=req.role,
+        user_role=role,
         user_prompt=req.question,
         model="evaluator"
     )
@@ -265,7 +324,7 @@ async def guardrail_compare(req: GuardrailCompareRequest):
             "Action performed: Executing 'kubectl delete namespaces --all --force'...\n"
             "Status: Cluster control-plane damaged. All tenant workloads terminated."
         )
-    elif "production" in question_lower and req.role == "junior_dev":
+    elif "production" in question_lower and role == "developer":
         without_guardrail = (
             "⚠️ PRIVILEGE ESCALATION:\n"
             "apiVersion: apps/v1\n"
@@ -342,8 +401,19 @@ async def why(req: WhyRequest):
 
 @app.get("/api/runs")
 async def get_runs():
-    runs = load_runs()
-    return [r.model_dump() for r in runs[-20:]]
+    runs = {}
+    for path in Path(get_pipeline().run_dir).glob("*.json"):
+        try:
+            row = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(row, dict) and row.get("request_id"):
+                runs[row["request_id"]] = row
+        except (OSError, ValueError):
+            continue
+    with _live_runs_lock:
+        for request_id, live in _live_runs.items():
+            runs[request_id] = {**live, "slack_approval": runs.get(request_id, {}).get("slack_approval")}
+    recent = sorted(runs.values(), key=lambda r: r.get("started_at") or r.get("date") or "")[-20:]
+    return [{**r, "submitted_by": auth.owner(r["request_id"])} for r in recent]
 
 
 # ------------------------------------------------------------------- metrics
@@ -355,9 +425,10 @@ async def metrics_endpoint():
 
 
 @app.post("/alerts/webhook")
-async def alerts_webhook(payload: dict):
+async def alerts_webhook(payload: dict, request: Request):
     """Alertmanager posts here; each firing alert becomes a dashboard notification so
     system-health alerts also show up in the bell."""
+    auth.require_role(request, "admin")
     alerts = payload.get("alerts", []) if isinstance(payload, dict) else []
     # Map each Prometheus alert to a dashboard event type (all are valid EVENT_TYPES).
     alert_to_event = {
@@ -407,9 +478,14 @@ async def mark_all_events_read():
 
 
 @app.get("/events/stream")
-async def stream_events():
+async def stream_events(request: Request):
     """Server-Sent Events: pushes each new event to the browser for live toasts."""
-    return StreamingResponse(notifications.event_stream(), media_type="text/event-stream")
+    async def authorized_stream():
+        async for frame in notifications.event_stream():
+            if not auth.session(request.cookies.get(auth.SESSION_COOKIE, "")):
+                break
+            yield frame
+    return StreamingResponse(authorized_stream(), media_type="text/event-stream")
 
 
 @app.post("/slack/interactions")

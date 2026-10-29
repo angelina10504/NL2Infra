@@ -57,9 +57,9 @@ def test_pipeline_pauses_bump_pending_approvals_gauge(tmp_path, monkeypatch):
     assert val("nl2infra_pending_approvals") == before  # released on completion
 
 
-def test_alert_webhook_emits_dashboard_event():
+def test_alert_webhook_emits_dashboard_event(team_client):
     import server
-    client = TestClient(server.app)
+    client = team_client()
     payload = {"alerts": [{
         "status": "firing",
         "labels": {"alertname": "LowSuccessRate", "severity": "critical"},

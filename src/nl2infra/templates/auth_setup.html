@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Set up GitHub sign-in · NL2Infra</title>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;700&family=IBM+Plex+Mono&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box}body{margin:0;padding:32px 16px;background:#F2F0EB;color:#15150F;font:16px/1.6 Archivo,sans-serif}main{max-width:700px;margin:24px auto;padding:28px;background:#FBFAF7;border:1px solid #D6D2C8}h1{font-size:25px;line-height:1.3;margin:0 0 16px}h2{font-size:18px}p{margin:12px 0}.muted{color:#6D6A60}a{color:inherit}code,pre{font-family:'IBM Plex Mono',monospace;font-size:12px}code{overflow-wrap:anywhere}pre{padding:14px;background:#F2F0EB;border:1px solid #D6D2C8;white-space:pre-wrap;overflow-wrap:anywhere}.back{display:inline-block;padding:9px 14px;margin-top:12px;background:#B3263A;color:#FBFAF7;text-decoration:none}li{margin:12px 0}@media(max-width:450px){main{margin:0;padding:18px}}
+  </style>
+</head>
+<body>
+<main>
+  <h1>Set up GitHub sign-in</h1>
+  <p>The server is running. GitHub sign-in needs its OAuth app credentials before your team can use it.</p>
+  <ol>
+    <li>Open <a href="https://github.com/settings/applications/new" target="_blank" rel="noreferrer">GitHub → New OAuth App</a>. Enter these values:
+      <p>Application name: <strong>NL2Infra</strong></p>
+      <p>Homepage URL: <code>{{ORIGIN}}</code></p>
+      <p>Authorization callback URL: <code>{{CALLBACK}}</code></p>
+    </li>
+    <li>Copy its <strong>Client ID</strong>, generate a <strong>client secret</strong>, and enter them in your project's root <code>.env</code> file. Keep the secret private.</li>
+    <li>Find your numeric GitHub ID at <code>https://api.github.com/users/YOUR_USERNAME</code>, in the <code>id</code> field. Set it as the initial admin ID:
+<pre>GITHUB_OAUTH_CLIENT_ID=your_client_id
+GITHUB_OAUTH_CLIENT_SECRET=your_client_secret
+NL2INFRA_BOOTSTRAP_ADMIN_IDS=your_numeric_github_id</pre>
+    </li>
+    <li>Restart the FastAPI server after saving <code>.env</code>, then sign in.</li>
+  </ol>
+  <p class="muted">The homepage and callback must be reachable at the configured address. A tunnel restricted to Slack interactions will need a separate sign-in address or deployment configuration.</p>
+  <a class="back" href="/">Back to sign-in</a>
+</main>
+</body>
+</html>

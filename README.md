@@ -65,6 +65,10 @@ The pipeline is a fixed-order LangGraph:
 
 ## Quick start
 
+The dashboard requires GitHub sign-in and an invited project role. Configure the
+OAuth app and initial admin first using [Team access](docs/team-access.md).
+Developers create PRs, admins review them, and viewers can follow project state.
+
 ```bash
 # 1. Python 3.12+, then install deps
 python -m pip install -r requirements.txt

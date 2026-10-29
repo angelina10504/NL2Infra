@@ -11,6 +11,7 @@ ENV/
 
 # Secrets and environment configs
 .env
+data/
 *.pem
 *.key
 
@@ -22,6 +23,7 @@ events.jsonl
 htmlcov/
 
 # IDE
+.DS_Store
 .vscode/
 .idea/
 *.swp
