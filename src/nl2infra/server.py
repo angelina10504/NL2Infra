@@ -85,6 +85,78 @@ async def serve_index():
     return HTMLResponse("<h1>NL2Infra Studio template not found</h1>", status_code=404)
 
 
+@app.get("/research", response_class=HTMLResponse)
+async def serve_research():
+    # As on the dashboard, this shell contains no project data. The API requires a session.
+    return HTMLResponse((Path(TEMPLATE_PATH).parent / "research.html").read_text(encoding="utf-8"))
+
+
+def research_evaluation() -> dict:
+    """Read saved results on each request, using the CLI evaluator's scoring rules."""
+    from collections import Counter
+    from eval.evaluate import SCORED, arm_rows, load_logs
+
+    report = {"available": False, "message": "No benchmark results are available.",
+              "metadata": None, "warnings": [],
+              "arms": [{"id": arm, "available": False, "rows": {}, "unscored": {},
+                        "no_output": 0} for arm in "ABC"]}
+    folder = os.environ.get("NL2INFRA_BENCHMARK_DIR", str(Path(__file__).resolve().parents[2] / "runs" / "benchmark"))
+    try:
+        logs = [log for log in load_logs(folder) if log["arm"] in "ABC"]
+        if not logs:
+            return report
+        # A folder represents one experiment. Never silently combine incompatible settings.
+        settings = {(log.get("model_id"), log.get("temperature"), log.get("commit")) for log in logs}
+        identities = [(log["arm"], log["benchmark"]["id"], log["benchmark"]["repeat"]) for log in logs]
+        if len(settings) != 1 or len(identities) != len(set(identities)):
+            report["message"] = "These logs contain mixed experiment settings or duplicate runs. Use one benchmark dataset."
+            return report
+        if any(log.get("project_aware") or log.get("profile") for log in logs):
+            report["message"] = "This page evaluates the original four-check benchmark. Project-fit results need a separate evaluation."
+            return report
+        model, temperature, commit = next(iter(settings))
+        requests = {log["benchmark"]["id"] for log in logs}
+        report["metadata"] = {
+            "requests": len(requests),
+            "repeats": len({log["benchmark"]["repeat"] for log in logs}),
+            "model": model, "temperature": temperature, "commit": commit,
+        }
+        arm_keys = []
+        for arm in report["arms"]:
+            selected = [log for log in logs if log["arm"] == arm["id"]]
+            scored = [log for log in selected if log["summary"]["outcome"] in SCORED]
+            arm_keys.append({(log["benchmark"]["id"], log["benchmark"]["repeat"]) for log in scored})
+            arm["unscored"] = dict(Counter(log["summary"]["outcome"] for log in selected
+                                           if log["summary"]["outcome"] not in SCORED))
+            arm["no_output"] = sum(log["summary"]["outcome"] == "no_output" for log in selected)
+            if not scored:
+                continue
+            arm["rows"] = {key: "not measured" if value.startswith("n/a") else value
+                           for key, value in arm_rows(selected).items()}
+            # The CLI warns about incomplete token accounting. Suppress the estimate here.
+            if any(log["summary"].get("calls_without_token_counts", 0) for log in scored):
+                for key in ("Median tokens (in + out)", "Median tokens in", "Median tokens out"):
+                    arm["rows"][key] = "not measured"
+                report["warnings"].append(f"Arm {arm['id']} has calls without token counts; token use is not measured completely.")
+            arm["available"] = True
+        if not all(keys == arm_keys[0] for keys in arm_keys):
+            report["warnings"].append("The arms have different scored request sets. Compare their sample counts carefully.")
+        report["available"] = any(arm["available"] for arm in report["arms"])
+        report["message"] = "Computed from saved benchmark logs." if report["available"] else "No scored results are available."
+        return report
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        # Fail closed: malformed/incomplete logs must never become fabricated figures.
+        report.update(available=False, metadata=None, message="The benchmark logs could not be evaluated. Results are not measured.", warnings=[])
+        for arm in report["arms"]:
+            arm.update(available=False, rows={}, unscored={}, no_output=0)
+        return report
+
+
+@app.get("/api/research")
+def get_research_evaluation():
+    return research_evaluation()
+
+
 _pipeline = None
 _live_runs: Dict[str, dict] = {}
 _live_runs_lock = threading.Lock()

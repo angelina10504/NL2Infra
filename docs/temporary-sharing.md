@@ -12,13 +12,13 @@ Use the HTTPS hostname assigned by ngrok. Replace `YOUR-NGROK-HOST` in both
 commands below with that hostname. In the project directory, run:
 
 ```bash
-NL2INFRA_AUTH_BASE_URL=https://YOUR-NGROK-HOST ./.venv/bin/python -m uvicorn server:app --app-dir src/nl2infra --host 127.0.0.1 --port 8001
+NL2INFRA_AUTH_BASE_URL=https://YOUR-NGROK-HOST ./.venv/bin/python -m uvicorn server:app --app-dir src/nl2infra --host 127.0.0.1 --port 8000
 ```
 
 In a second terminal:
 
 ```bash
-ngrok http 8001 --url https://YOUR-NGROK-HOST --traffic-policy-file infra/ngrok-team-policy.json --inspect=false
+ngrok http 8000 --url https://YOUR-NGROK-HOST --traffic-policy-file infra/ngrok-team-policy.json --inspect=false
 ```
 
 Only one ngrok tunnel can serve that hostname. Stop the earlier tunnel before
@@ -54,6 +54,6 @@ send an invitation message. Each teammate must sign in with the invited account.
 
 ## Stop sharing
 
-Stop the ngrok process with Ctrl+C and stop the shared server on port 8001.
-This leaves the local server on port 8000 and stored memberships in place. An
+Stop the ngrok process with Ctrl+C and stop the shared server on port 8000.
+Stored memberships stay in place. An
 admin can disable a member in About; their existing session will lose access.
