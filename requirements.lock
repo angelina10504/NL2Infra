@@ -166,6 +166,8 @@ uritools==6.1.3
 urllib3==2.8.0
 uuid-utils==0.17.1
 uvicorn==0.54.0
+# Streamlit needs watchdog on Linux only (it declares: watchdog; platform_system != "Darwin").
+watchdog==7.1.1 ; sys_platform == "linux"
 wcwidth==0.9.2
 websockets==16.1.1
 xmltodict==1.0.4

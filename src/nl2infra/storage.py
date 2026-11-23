@@ -9,14 +9,16 @@ _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")
 
 
 def git_commit() -> Optional[str]:
-    """Commit of the app code, or None when the folder is not a git repository."""
+    """Commit of the app code. Without git (e.g. in the container image), NL2INFRA_GIT_COMMIT,
+    which the image sets at build time; None if neither is available."""
+    fallback = os.environ.get("NL2INFRA_GIT_COMMIT", "").strip() or None
     try:
         proc = subprocess.run(
             ["git", "-C", _REPO_ROOT, "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10
         )
     except Exception:
-        return None
-    return proc.stdout.strip() if proc.returncode == 0 and proc.stdout.strip() else None
+        return fallback
+    return proc.stdout.strip() if proc.returncode == 0 and proc.stdout.strip() else fallback
 
 
 def run_log(state: RunState) -> dict:

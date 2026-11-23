@@ -1,0 +1,18 @@
+# Never enters the build context: secrets, local state, run logs, caches.
+.env*
+!.env.example
+.venv*
+.git
+.claude
+CLAUDE.md
+.sf
+runs/
+data/
+events.jsonl
+nl2infra-manifests/
+test_artifacts/
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+**/.DS_Store

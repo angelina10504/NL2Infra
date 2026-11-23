@@ -97,11 +97,21 @@ To go back to Podman: quit Docker Desktop, `podman machine start`, then
 | Machine | rootful, 4 CPUs, 4096 MB RAM, 60 GB disk, libkrun |
 | `podman compose` | Has no compose provider of its own. It runs the external `/usr/local/bin/docker-compose` (Docker Compose v5.5.0, installed with Docker Desktop). |
 
+## After `podman machine stop` / `start`
+
+The kind node **does not restart by itself**. It shows `Exited (137)`. Start it by hand:
+
+```bash
+podman start nl2infra-control-plane
+kubectl get nodes      # Ready again after a few seconds; dev/staging/production are kept
+```
+
+Tested on 23 Nov 2026. Right after starting, the API server can briefly answer `Forbidden`
+while its permission rules (RBAC) load; the next call works.
+
 ## Not tested yet
 
-- Whether the kind cluster survives `podman machine stop` / `start`, or the laptop sleeping.
-  If it doesn't, recreate it with `make cluster PROVIDER=podman`. The node image is cached,
-  so that's much faster than the first time.
+- Whether the cluster survives the laptop sleeping.
 - Running `make cluster PROVIDER=podman` itself. The cluster above was created with the
   equivalent `kind` command, and the Makefile target was only checked with `make -n`.
 - Switching back to Docker, as described above.
