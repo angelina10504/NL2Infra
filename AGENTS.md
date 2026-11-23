@@ -74,7 +74,7 @@ longer the same experiment.
 | `observability/` | Prometheus, Alertmanager, Grafana configs and dashboard |
 | `docker-compose.observability.yml` | Monitoring stack only — **the app has never been containerised** |
 | `infra/kind-config.yaml`, `infra/argocd/` | Local cluster config; ArgoCD apps (never applied) |
-| `tests/` | 23 test files (22 committed + untracked `test_research.py`); full suite must stay green |
+| `tests/` | 23 test files, 422 tests; full suite must stay green |
 | `.github/workflows/ci.yml` | CI workflow — exists locally, but `.github/workflows/` is gitignored |
 
 Run locally today: `make run` (uvicorn on :8000), `make streamlit`, `make test`.
@@ -97,12 +97,10 @@ Run locally today: `make run` (uvicorn on :8000), `make streamlit`, `make test`.
 **Recorded benchmark result — do not disturb it.** Final pass rate A 0/20, B 2/20, C 19/20;
 all-checks-pass 0 / 0 / 19. Anything you change must leave the benchmark reproducible.
 
-**Local and GitHub are both at `148d23e`** (29 October), plus uncommitted work: a `/research`
-page and `/api/research` endpoint, a matching ngrok policy rule, and a Prometheus scrape-port
-change to 8001. Phase 0 settles these.
-
-**No kind cluster exists right now.** It must be recreated (`make cluster`, `make namespaces`)
-before the dry-run checker or the real Gauntlet can work.
+**Phase 0 baseline (23 Nov, commit `a56578a`):** 422 tests pass, Rego 46/46. Python 3.12.13,
+Checkov 3.3.26, Conftest with embedded OPA 1.19.0, kubectl/cluster v1.37.0, kind v0.33.0
+(cluster `nl2infra`, namespaces dev/staging/production), Docker 29.7.2. These tool versions
+match what all 60 recorded benchmark runs used, and must stay the same.
 
 ---
 
@@ -168,10 +166,12 @@ rate-limit waits.
 - **`host.docker.internal` is Docker-specific.** Once the app is inside the compose network,
   Prometheus should scrape it by service name (`app:8000`), not via the host.
 - **The app port is 8000.** It is set in the Makefile, README, `.env.example`, tests, and the
-  Alertmanager webhook. The uncommitted Prometheus change to 8001 is being reverted in Phase 0.
+  Alertmanager webhook.
   Use 8000 everywhere, inside and outside containers.
 - **Slack needs a public URL** (ngrok — see `docs/temporary-sharing.md` and
   `infra/ngrok-team-policy.json`), and that URL changes on every restart.
+- **Finder creates `.DS_Store` files** in any folder it opens. A test that reads every file in
+  `policies/` breaks on them.
 - **The laptop sleeping kills Docker/Podman VMs.** Long runs go under `caffeinate -i`.
 
 ---

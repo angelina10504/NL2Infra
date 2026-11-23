@@ -72,6 +72,7 @@ Developers create PRs, admins review them, and viewers can follow project state.
 ```bash
 # 1. Python 3.12+, then install deps
 python -m pip install -r requirements.txt
+#    For a reproducible install use `requirements.lock`.
 
 # 2. Configure (copy the example and fill in a key, or stay in mock mode)
 cp .env.example .env

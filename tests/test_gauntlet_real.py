@@ -90,6 +90,8 @@ def test_every_rule_has_a_pass_and_a_fail_test():
     rules, tests = set(), ""
     for root, _, names in os.walk(POLICIES):
         for name in names:
+            if name.startswith("."):  # e.g. .DS_Store, which Finder creates
+                continue
             text = open(os.path.join(root, name)).read()
             if name.endswith("_test.rego"):
                 tests += text
