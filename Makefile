@@ -1,4 +1,4 @@
-.PHONY: setup setup-env cluster namespaces deploy-argocd test run streamlit image image-test image-run kubeconfig-internal
+.PHONY: setup setup-env cluster namespaces deploy-argocd test run streamlit image image-test image-run kubeconfig-internal up down ps logs config check-secrets
 
 export PATH := $(HOME)/.local/bin:$(PATH)
 
@@ -61,3 +61,29 @@ image-run: kubeconfig-internal
 		-e NL2INFRA_AUTH_DB=/app/state/auth.sqlite3 -e NL2INFRA_EVENTS_FILE=/app/state/events.jsonl \
 		-v $(CURDIR)/runs/benchmark:/app/runs/benchmark:ro -v nl2infra-state:/app/state \
 		nl2infra:dev
+
+# ---- Whole stack: app + Prometheus + Alertmanager + Grafana (compose.yaml; docs/compose.md) --
+# `make up` expects nl2infra:dev from `make image` and the kubeconfig from `make kubeconfig-internal`.
+# Compose file secrets (gitignored, mode 600). They must exist before `up`: Grafana silently
+# falls back to admin/admin if its password file is missing. See docs/compose.md.
+SECRET_FILES = secrets/alert_webhook_token secrets/grafana_admin_password
+check-secrets:
+	@for f in $(SECRET_FILES); do \
+	  if [ ! -s $$f ]; then echo "missing or empty: $$f (see docs/compose.md, Secrets)" >&2; exit 1; fi; \
+	done
+
+up: check-secrets
+	podman compose up -d
+
+# The resolved compose config without .env values (plain `podman compose config` prints them).
+config:
+	podman compose config --no-env-resolution
+
+down:
+	podman compose down
+
+ps:
+	podman compose ps
+
+logs:
+	podman compose logs --tail=100

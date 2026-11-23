@@ -57,15 +57,18 @@ def test_pipeline_pauses_bump_pending_approvals_gauge(tmp_path, monkeypatch):
     assert val("nl2infra_pending_approvals") == before  # released on completion
 
 
-def test_alert_webhook_emits_dashboard_event(team_client):
+def test_alert_webhook_emits_dashboard_event(tmp_path, monkeypatch):
     import server
-    client = team_client()
+    token_file = tmp_path / "alert_webhook_token"
+    token_file.write_text("test-token\n", encoding="utf-8")
+    monkeypatch.setenv("NL2INFRA_ALERT_WEBHOOK_TOKEN_FILE", str(token_file))
+    client = TestClient(server.app)
     payload = {"alerts": [{
         "status": "firing",
         "labels": {"alertname": "LowSuccessRate", "severity": "critical"},
         "annotations": {"summary": "success rate below 80%"},
     }]}
-    res = client.post("/alerts/webhook", json=payload).json()
+    res = client.post("/alerts/webhook", json=payload, headers={"Authorization": "Bearer test-token"}).json()
     assert res["emitted"] == 1
     assert any(e["type"] == "high_failure_rate" and e["severity"] == "critical"
                for e in notifications.list_events())

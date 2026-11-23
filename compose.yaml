@@ -1,0 +1,151 @@
+# NL2Infra: the whole system on Podman. App + Prometheus + Alertmanager + Grafana.
+# (OTel Collector and Jaeger join in Phase 5.)
+#
+#   make image PROVIDER=podman               # builds nl2infra:dev (needs --format docker for HEALTHCHECK)
+#   make kubeconfig-internal PROVIDER=podman # kubeconfig that reaches kind by node name
+#   podman compose up -d                     # or: make up
+#
+# Every service: image pinned by tag+digest, UID >= 10000, memory+CPU limits, all capabilities
+# dropped, no-new-privileges, read-only root filesystem (+ tmpfs), healthcheck, ports on
+# 127.0.0.1 only. Secrets come from .env and secrets/ at run time and are never in this file.
+# See docs/compose.md.
+name: nl2infra
+
+x-hardening: &hardening
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  read_only: true
+  tmpfs: ["/tmp"]
+  restart: unless-stopped
+
+services:
+  app:
+    <<: *hardening
+    image: localhost/nl2infra:dev   # local build from `make image`; not pulled
+    pull_policy: never
+    user: "10001:10001"
+    mem_limit: 1g
+    cpus: 1.0
+    env_file: .env                  # API keys, OAuth, Slack: injected at run time only
+    environment:
+      # These win over .env: mock mode by default, and the container's own writable paths.
+      MOCK_MODE: "${NL2INFRA_MOCK_MODE:-true}"
+      KUBECONFIG: /kube/config
+      NL2INFRA_RUNS_DIR: /app/state/runs
+      NL2INFRA_AUTH_DB: /app/state/auth.sqlite3
+      NL2INFRA_EVENTS_FILE: /app/state/events.jsonl
+      NL2INFRA_ALERT_WEBHOOK_TOKEN_FILE: /run/secrets/alert_webhook_token
+    secrets: [alert_webhook_token]
+    volumes:
+      - ${NL2INFRA_KUBECONFIG:-${HOME}/.kube/nl2infra-internal.config}:/kube/config:ro
+      - ./runs/benchmark:/app/runs/benchmark:ro
+      - ./runs/pilot:/app/runs/pilot:ro
+      - nl2infra-state:/app/state
+    networks: [default, kind]
+    ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/metrics', timeout=4).status == 200 else 1)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+  alertmanager:
+    <<: *hardening
+    image: docker.io/prom/alertmanager:v0.35.0@sha256:e638797febd034838eca8b98cdbd46f951e9bf7f178777aa8669167406a9946c
+    user: "65534:65534"
+    mem_limit: 128m
+    cpus: 0.25
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    secrets: [alert_webhook_token]
+    volumes:
+      - ./observability/alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    ports: ["127.0.0.1:9093:9093"]
+    depends_on:
+      app: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9093/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  prometheus:
+    <<: *hardening
+    image: docker.io/prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06
+    user: "65534:65534"
+    mem_limit: 512m
+    cpus: 0.5
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    volumes:
+      - ./observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./observability/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus-data:/prometheus
+    ports: ["127.0.0.1:9090:9090"]
+    depends_on:
+      app: {condition: service_healthy}
+      alertmanager: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9090/-/healthy"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+
+  grafana:
+    <<: *hardening
+    image: docker.io/grafana/grafana:13.3.1@sha256:0615ec4fbd4072004b7d86b46ded63013a74b7d6eb1119273dd89e8fa25c13cf
+    user: "65534:65534"             # not the image default 472: our policy wants UID >= 10000 or nobody
+    mem_limit: 512m
+    cpus: 0.5
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_DEFAULT_THEME: light
+      GF_LOG_MODE: console          # no log files: the root filesystem is read-only
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
+    secrets: [grafana_admin_password]
+    volumes:
+      - ./observability/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./observability/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on:
+      prometheus: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+secrets:
+  alert_webhook_token:
+    file: ./secrets/alert_webhook_token        # gitignored; see docs/compose.md
+  grafana_admin_password:
+    # Lives only here (gitignored, mode 600), not in .env, so the app never sees it.
+    # A file, because compose only allows file secrets in read-only containers.
+    file: ./secrets/grafana_admin_password
+
+volumes:
+  nl2infra-state:
+    name: nl2infra-state                       # the same volume `make image-run` uses
+  # Owned by the service's UID, so the non-root containers can write their data.
+  prometheus-data:
+    driver_opts: {o: "uid=65534,gid=65534"}
+  alertmanager-data:
+    driver_opts: {o: "uid=65534,gid=65534"}
+  grafana-data:
+    driver_opts: {o: "uid=65534,gid=65534"}
+
+networks:
+  kind:
+    external: true                             # kind's network: the app reaches the API server

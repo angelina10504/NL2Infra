@@ -14,5 +14,5 @@ scrape_configs:
   - job_name: "nl2infra"
     metrics_path: /metrics
     static_configs:
-      # The NL2Infra app runs on the host, outside this compose network.
-      - targets: ["host.docker.internal:8000"]
+      # The app runs in the same compose network (compose.yaml), reached by service name.
+      - targets: ["app:8000"]

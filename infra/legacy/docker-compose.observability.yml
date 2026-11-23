@@ -1,3 +1,9 @@
+# LEGACY: the old Docker-only monitoring stack (Prometheus, Alertmanager, Grafana), with the
+# app on the host via host.docker.internal, `:latest` images and anonymous Grafana Admin.
+# Replaced in Phase 3 by compose.yaml at the repo root (app + monitoring on Podman, pinned and
+# hardened; see docs/compose.md). Kept for reference only: its ./observability paths were
+# relative to the repo root, so it no longer runs from here.
+#
 # NL2Infra observability stack: Prometheus + Alertmanager + Grafana.
 #
 # The NL2Infra app runs on the host (uvicorn on :8000). These containers reach it through

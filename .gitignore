@@ -40,3 +40,6 @@ test_artifacts/
 
 # Salesforce CLI tooling cache (not part of this project)
 .sf/
+
+# Local secret files (compose secrets), never committed
+secrets/

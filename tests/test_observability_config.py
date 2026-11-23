@@ -21,7 +21,7 @@ KNOWN_METRICS = {
 
 def test_compose_and_yaml_configs_parse():
     for rel in [
-        "../docker-compose.observability.yml",
+        "../compose.yaml",
         "prometheus/prometheus.yml",
         "prometheus/alert_rules.yml",
         "alertmanager/alertmanager.yml",
@@ -30,6 +30,35 @@ def test_compose_and_yaml_configs_parse():
     ]:
         with open(os.path.join(OBS, rel), encoding="utf-8") as f:
             assert yaml.safe_load(f) is not None, rel
+
+
+def test_compose_services_follow_our_container_policy():
+    """compose.yaml must pass the rules our policies enforce on generated workloads."""
+    with open(os.path.join(ROOT, "compose.yaml"), encoding="utf-8") as f:
+        compose = yaml.safe_load(f)
+    services = compose["services"]
+    assert {"app", "prometheus", "alertmanager", "grafana"} <= set(services)
+    for name, svc in services.items():
+        image = svc["image"]
+        assert ":latest" not in image and not image.endswith(":latest"), name
+        if name != "app":  # the app is the local `make image` build
+            assert re.search(r":[\w.\-]+@sha256:[0-9a-f]{64}$", image), f"{name}: pin by tag and digest"
+        uid = int(str(svc["user"]).split(":")[0])
+        assert uid >= 10000 or uid == 65534, f"{name}: user {uid}"
+        assert svc.get("mem_limit") and svc.get("cpus"), f"{name}: memory and CPU limits"
+        assert svc.get("cap_drop") == ["ALL"], name
+        assert "no-new-privileges:true" in svc.get("security_opt", []), name
+        assert svc.get("read_only") is True, name
+        assert not svc.get("privileged") and svc.get("network_mode") != "host", name
+        assert "healthcheck" in svc, name
+        for port in svc.get("ports", []):
+            assert str(port).startswith("127.0.0.1:"), f"{name}: {port}"
+    # Inside the compose network, services reach each other by name, never via the host.
+    for rel in ["prometheus/prometheus.yml", "alertmanager/alertmanager.yml",
+                "grafana/provisioning/datasources/datasource.yml"]:
+        with open(os.path.join(OBS, rel), encoding="utf-8") as f:
+            assert "host.docker.internal" not in f.read(), rel
+    assert services["grafana"]["environment"]["GF_AUTH_ANONYMOUS_ORG_ROLE"] == "Viewer"
 
 
 def test_alert_rules_cover_the_three_required_alerts():

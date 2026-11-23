@@ -35,7 +35,8 @@ app.include_router(auth.router)
 @app.middleware("http")
 async def project_access(request: Request, call_next):
     path = request.url.path
-    protected = path.startswith(("/api/", "/events", "/ask")) or path == "/alerts/webhook"
+    # /alerts/webhook is not session-based: it checks its own bearer token (see alerts_webhook).
+    protected = path.startswith(("/api/", "/events", "/ask"))
     if protected and path != "/api/session":
         user = auth.session(request.cookies.get(auth.SESSION_COOKIE, ""))
         if not user:
@@ -496,11 +497,30 @@ async def metrics_endpoint():
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
+def _alert_webhook_token() -> str:
+    """The shared secret Alertmanager sends as a bearer token. Read from a file (a compose
+    secret in the container) on every request; empty when unset or unreadable."""
+    path = os.environ.get("NL2INFRA_ALERT_WEBHOOK_TOKEN_FILE", "/run/secrets/alert_webhook_token")
+    try:
+        return Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
 @app.post("/alerts/webhook")
-async def alerts_webhook(payload: dict, request: Request):
+async def alerts_webhook(request: Request):
     """Alertmanager posts here; each firing alert becomes a dashboard notification so
-    system-health alerts also show up in the bell."""
-    auth.require_role(request, "admin")
+    system-health alerts also show up in the bell. Machine-to-machine: it needs the shared
+    bearer token instead of a session, and stays locked (401) if no token is configured."""
+    expected = _alert_webhook_token()
+    scheme, _, supplied = request.headers.get("Authorization", "").partition(" ")
+    if not expected or scheme.lower() != "bearer" or not hmac.compare_digest(
+            supplied.strip().encode(), expected.encode()):
+        return JSONResponse({"error": "Missing or invalid alert webhook token"}, status_code=401)
+    try:
+        payload = await request.json()
+    except ValueError:
+        return JSONResponse({"error": "Body must be JSON"}, status_code=400)
     alerts = payload.get("alerts", []) if isinstance(payload, dict) else []
     # Map each Prometheus alert to a dashboard event type (all are valid EVENT_TYPES).
     alert_to_event = {

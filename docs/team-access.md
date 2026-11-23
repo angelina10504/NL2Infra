@@ -89,9 +89,14 @@ Do not give developers a bypass that lets them update the protected branch.
 ## Monitoring
 
 `/metrics` remains a machine-readable scrape endpoint; keep monitoring services
-on a private network. `/alerts/webhook` now requires an authenticated admin and
-CSRF token, so an unauthenticated Alertmanager receiver must be adapted before
-it can publish dashboard alerts. The dashboard's run notifications and Slack
-delivery use the existing event path and continue normally.
+on a private network. `/alerts/webhook` is machine-to-machine: it accepts a
+request only with the shared bearer token from `secrets/alert_webhook_token`
+(read via `NL2INFRA_ALERT_WEBHOOK_TOKEN_FILE`, default
+`/run/secrets/alert_webhook_token`), compared in constant time. Sessions and
+CSRF tokens are not accepted there, and with no token configured the route
+stays locked (401). Alertmanager sends the token via `http_config.authorization`
+(see [compose.md](compose.md)). Every other route keeps its session auth. The
+dashboard's run notifications and Slack delivery use the existing event path and
+continue normally.
 
 Reference: [GitHub's OAuth authorization flow](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps).

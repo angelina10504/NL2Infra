@@ -69,6 +69,11 @@ The dashboard requires GitHub sign-in and an invited project role. Configure the
 OAuth app and initial admin first using [Team access](docs/team-access.md).
 Developers create PRs, admins review them, and viewers can follow project state.
 
+**Whole system in containers (Podman):** app + Prometheus + Alertmanager + Grafana with one
+command — see [docs/compose.md](docs/compose.md) for the quick start (`make up`).
+
+On the host:
+
 ```bash
 # 1. Python 3.12+, then install deps
 python -m pip install -r requirements.txt
@@ -107,8 +112,7 @@ binaries are absent.
 ## Observability (Prometheus + Grafana)
 
 ```bash
-# with the app running on :8000
-docker compose -f docker-compose.observability.yml up -d
+make up      # app + Prometheus + Alertmanager + Grafana on Podman (docs/compose.md)
 ```
 
 - Grafana: http://localhost:3000 — the **NL2Infra Overview** dashboard is pre-provisioned
@@ -116,7 +120,8 @@ docker compose -f docker-compose.observability.yml up -d
   token usage, p95 duration, pending approvals).
 - Prometheus: http://localhost:9090 · Alertmanager: http://localhost:9093.
 - Alerts (low success rate, escalation spike, stale approvals) are posted back to the app at
-  `/alerts/webhook`, so system-health alerts also appear in the dashboard bell.
+  `/alerts/webhook` with a shared bearer token (`secrets/alert_webhook_token`), so system-health
+  alerts also appear in the dashboard bell.
 
 ## Notifications
 
