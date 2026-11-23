@@ -9,8 +9,11 @@ setup:
 	uv venv --python 3.12
 	.venv/bin/python -m pip install -r requirements.txt
 
+# `make cluster` uses kind's default provider (Docker). `make cluster PROVIDER=podman`
+# runs kind on a rootful Podman machine instead; see docs/podman.md.
+PROVIDER ?=
 cluster:
-	kind create cluster --name nl2infra --config infra/kind-config.yaml
+	$(if $(PROVIDER),KIND_EXPERIMENTAL_PROVIDER=$(PROVIDER) )kind create cluster --name nl2infra --config infra/kind-config.yaml
 
 # Server dry-run needs every namespace a role can target to exist.
 namespaces:
