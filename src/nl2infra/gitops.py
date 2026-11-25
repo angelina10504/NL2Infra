@@ -132,3 +132,42 @@ class GitOpsService:
     def close_pull_request(self, pr_url: str) -> None:
         """Close a declined PR in the configured manifests repository."""
         self._pull_request(pr_url).edit(state="closed")
+
+    def pull_request_status(self, pr_url: str, filenames=()) -> dict:
+        """Observed state of a PR, plus this request's manifests as they are at the merge commit.
+
+        Read-only. `filenames` are the files the run generated; unchanged ones do not appear in
+        the PR diff but are still part of what must be running.
+        """
+        pr = self._pull_request(pr_url)
+        merged = bool(pr.merged)
+        status = {
+            "number": pr.number, "state": pr.state, "merged": merged,
+            "head_ref": pr.head.ref, "base_ref": pr.base.ref,
+            "default_branch": pr.base.repo.default_branch,
+            "merge_commit_sha": pr.merge_commit_sha if merged else None,
+            "merged_at": pr.merged_at.isoformat() if merged and pr.merged_at else None,
+            "environment": None, "files": {},
+        }
+        if not merged:
+            return status
+
+        changed = [item.filename for item in pr.get_files() if item.status != "removed"]
+        folders = {path.split("/", 1)[0] for path in changed if "/" in path}
+        if len(folders) != 1 or any("/" not in path for path in changed):
+            return status
+        environment = folders.pop()
+        status["environment"] = environment
+
+        from github import UnknownObjectException
+        repo = pr.base.repo
+        paths = set(changed) | {f"{environment}/{name}" for name in filenames}
+        for path in sorted(paths):
+            if not path.endswith((".yaml", ".yml", ".json")):
+                continue
+            try:
+                content = repo.get_contents(path, ref=status["merge_commit_sha"])
+            except UnknownObjectException:
+                continue  # removed during review
+            status["files"][path] = content.decoded_content.decode("utf-8")
+        return status

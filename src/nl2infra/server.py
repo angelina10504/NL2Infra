@@ -6,6 +6,7 @@ import logging
 import threading
 import hmac
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional, Dict
 from fastapi import BackgroundTasks, FastAPI, Request, HTTPException
@@ -20,6 +21,7 @@ from contracts import RunState, Plan, Resource, Violation
 from guardrails import check_guardrails
 from pipeline import Pipeline
 import telemetry
+import deploy_tracker
 import notifications
 from notifications import slack as slack_notifications
 import auth
@@ -28,7 +30,19 @@ from fastapi.responses import Response
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="NL2Infra Enterprise Studio", version="1.0.0")
+
+@asynccontextmanager
+async def lifespan(_app):
+    """Follow merged pull requests to their rollout. Off unless NL2INFRA_DEPLOY_OBSERVER=true."""
+    stop = threading.Event()
+    if deploy_tracker.enabled():
+        deploy_tracker.start_watcher(os.environ.get("NL2INFRA_RUNS_DIR", "runs"),
+                                     slack_notifications._gitops_service, stop=stop)
+    yield
+    stop.set()
+
+
+app = FastAPI(title="NL2Infra Enterprise Studio", version="1.0.0", lifespan=lifespan)
 
 telemetry.instrument_app(app)
 app.include_router(auth.router)
@@ -203,7 +217,7 @@ def _response(state: RunState, awaiting_approval: bool) -> dict:
         "iterations": state.iterations,
         "pr_url": state.pr_url,
         "pr_error": state.pr_error,
-        "deploy": state.deploy,
+        "deploy": deploy_tracker.view({"pr_url": state.pr_url, "deploy": state.deploy}),
         "metrics": state.metrics,
         "rejection_reason": state.rejection_reason,
         "submitted_by": auth.owner(state.request_id),
@@ -304,7 +318,14 @@ async def get_live_run(request_id: str):
     if result is None:
         return JSONResponse({"error": "run not found"}, status_code=404)
     return {**result, "submitted_by": auth.owner(request_id),
+            "deploy": _deploy_view(result, saved),
             "slack_approval": (saved or {}).get("slack_approval")}
+
+
+def _deploy_view(result: dict, saved: Optional[dict]) -> dict:
+    """The saved record is newer than the in-memory snapshot: the deploy watcher writes to it."""
+    source = saved if saved and saved.get("deploy") else result
+    return deploy_tracker.view(source)
 
 
 class PRReviewRequest(BaseModel):
@@ -323,6 +344,8 @@ def review_pr(req: PRReviewRequest, request: Request, background_tasks: Backgrou
     prior = run.get("slack_approval") or {}
     if prior.get("outcome"):
         return {"outcome": prior["outcome"]}
+    if deploy_tracker.is_simulated(run.get("pr_url")):
+        raise HTTPException(409, "This is a simulated pull request; there is nothing to merge")
     if run.get("status") != "passed" or not str(run.get("pr_url", "")).startswith("https://github.com/"):
         raise HTTPException(409, "This run has no passed pull request to review")
     background_tasks.add_task(slack_notifications.review_from_dashboard, req.request_id,
@@ -486,9 +509,12 @@ async def get_runs():
             continue
     with _live_runs_lock:
         for request_id, live in _live_runs.items():
-            runs[request_id] = {**live, "slack_approval": runs.get(request_id, {}).get("slack_approval")}
+            saved = runs.get(request_id)
+            runs[request_id] = {**live, "deploy": _deploy_view(live, saved),
+                                "slack_approval": (saved or {}).get("slack_approval")}
     recent = sorted(runs.values(), key=lambda r: r.get("started_at") or r.get("date") or "")[-20:]
-    return [{**r, "submitted_by": auth.owner(r["request_id"])} for r in recent]
+    return [{**r, "deploy": deploy_tracker.view(r), "submitted_by": auth.owner(r["request_id"])}
+            for r in recent]
 
 
 # ------------------------------------------------------------------- metrics

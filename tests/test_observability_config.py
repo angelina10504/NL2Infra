@@ -81,3 +81,13 @@ def test_dashboard_is_valid_json_and_queries_known_metrics():
     for name in referenced:
         base = re.sub(r"_(bucket|sum|count)$", "", name)
         assert base in KNOWN_METRICS, f"dashboard references unknown metric: {name}"
+
+
+def test_healthcheck_arguments_survive_podman_argument_splitting():
+    """Podman 5.4's Docker API splits a CMD argument at spaces, which broke the app check."""
+    from pathlib import Path
+    import yaml
+    compose = yaml.safe_load((Path(__file__).resolve().parents[1] / "compose.yaml").read_text(encoding="utf-8"))
+    for name, service in compose["services"].items():
+        command = service["healthcheck"]["test"]
+        assert command[0] == "CMD" and not [part for part in command if " " in part], name

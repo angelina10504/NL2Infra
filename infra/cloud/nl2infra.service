@@ -1,0 +1,19 @@
+[Unit]
+Description=NL2Infra (kind node and compose stack)
+Requires=podman.socket
+Wants=network-online.target
+After=network-online.target podman.socket
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=HOME=/root
+ExecStart=/opt/nl2infra/infra/cloud/start.sh
+ExecStop=/usr/bin/env DOCKER_HOST=unix:///run/podman/podman.sock /usr/bin/docker-compose --project-directory /opt/nl2infra -f /opt/nl2infra/compose.yaml stop
+ExecStop=/usr/bin/podman stop -t 30 nl2infra-control-plane
+Restart=on-failure
+RestartSec=20
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

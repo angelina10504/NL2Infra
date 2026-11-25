@@ -36,6 +36,8 @@ services:
       NL2INFRA_AUTH_DB: /app/state/auth.sqlite3
       NL2INFRA_EVENTS_FILE: /app/state/events.jsonl
       NL2INFRA_ALERT_WEBHOOK_TOKEN_FILE: /run/secrets/alert_webhook_token
+      # Deploy stage: follow real pull requests to their rollout (off unless switched on).
+      NL2INFRA_DEPLOY_OBSERVER: "${NL2INFRA_DEPLOY_OBSERVER:-false}"
     secrets: [alert_webhook_token]
     volumes:
       - ${NL2INFRA_KUBECONFIG:-${HOME}/.kube/nl2infra-internal.config}:/kube/config:ro
@@ -45,7 +47,8 @@ services:
     networks: [default, kind]
     ports: ["127.0.0.1:8000:8000"]
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/metrics', timeout=4).status == 200 else 1)"]
+      # No spaces inside an argument: Podman 5.4's Docker API (Debian 13) splits them.
+      test: ["CMD", "python", "-c", "__import__('urllib.request').request.urlopen('http://127.0.0.1:8000/metrics',timeout=4)"]
       interval: 15s
       timeout: 5s
       start_period: 30s

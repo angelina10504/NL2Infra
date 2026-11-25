@@ -1,0 +1,159 @@
+# The app's own cluster identity (instead of the kind admin kubeconfig).
+#
+# `kubectl apply --dry-run=server` needs the same RBAC verbs as a real write, so RBAC alone
+# cannot make the app read-only. The admission policy at the bottom closes that gap: the API
+# server rejects every create, update or delete from this identity unless it is a dry run.
+# Only Argo CD changes the cluster.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nl2infra-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nl2infra-app
+  namespace: nl2infra-system
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: nl2infra-app-token
+  namespace: nl2infra-system
+  annotations:
+    kubernetes.io/service-account.name: nl2infra-app
+type: kubernetes.io/service-account-token
+---
+# Validate generated manifests (dry run) and observe their rollout. Bound per namespace below.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nl2infra-app-workloads
+rules:
+- apiGroups: [""]
+  resources: [pods, services, configmaps, secrets, persistentvolumeclaims, serviceaccounts]
+  verbs: [get, list, create, patch]
+- apiGroups: [apps]
+  resources: [deployments, statefulsets, daemonsets, replicasets]
+  verbs: [get, list, create, patch]
+- apiGroups: [batch]
+  resources: [jobs, cronjobs]
+  verbs: [get, list, create, patch]
+- apiGroups: [networking.k8s.io]
+  resources: [ingresses, networkpolicies]
+  verbs: [get, list, create, patch]
+- apiGroups: [autoscaling]
+  resources: [horizontalpodautoscalers]
+  verbs: [get, list, create, patch]
+- apiGroups: [policy]
+  resources: [poddisruptionbudgets]
+  verbs: [get, list, create, patch]
+- apiGroups: [discovery.k8s.io]
+  resources: [endpointslices]
+  verbs: [get, list]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: nl2infra-app, namespace: dev}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: nl2infra-app-workloads}
+subjects: [{kind: ServiceAccount, name: nl2infra-app, namespace: nl2infra-system}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: nl2infra-app, namespace: staging}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: nl2infra-app-workloads}
+subjects: [{kind: ServiceAccount, name: nl2infra-app, namespace: nl2infra-system}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: nl2infra-app, namespace: production}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: nl2infra-app-workloads}
+subjects: [{kind: ServiceAccount, name: nl2infra-app, namespace: nl2infra-system}]
+---
+# The Gauntlet dry-runs resources for a namespace that the same files create against `default`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: nl2infra-app, namespace: default}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: nl2infra-app-workloads}
+subjects: [{kind: ServiceAccount, name: nl2infra-app, namespace: nl2infra-system}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nl2infra-app-cluster
+rules:
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [get, list]
+- apiGroups: [""]
+  resources: [namespaces]
+  verbs: [get, list, create, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nl2infra-app-cluster
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: nl2infra-app-cluster}
+subjects: [{kind: ServiceAccount, name: nl2infra-app, namespace: nl2infra-system}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: nl2infra-app-argocd, namespace: argocd}
+rules:
+- apiGroups: [argoproj.io]
+  resources: [applications]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: nl2infra-app-argocd, namespace: argocd}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: nl2infra-app-argocd}
+subjects: [{kind: ServiceAccount, name: nl2infra-app, namespace: nl2infra-system}]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: nl2infra-app-probe, namespace: nl2infra-probe}
+rules:
+- apiGroups: [apps]
+  resources: [deployments]
+  verbs: [get]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list]
+- apiGroups: [""]
+  resources: [pods/exec]
+  verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: nl2infra-app-probe, namespace: nl2infra-probe}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: nl2infra-app-probe}
+subjects: [{kind: ServiceAccount, name: nl2infra-app, namespace: nl2infra-system}]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: nl2infra-app-dry-run-only
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: ["*"]
+      apiVersions: ["*"]
+      operations: [CREATE, UPDATE, DELETE]
+      resources: ["*"]
+  matchConditions:
+  - name: only-the-app
+    expression: request.userInfo.username == "system:serviceaccount:nl2infra-system:nl2infra-app"
+  validations:
+  - expression: has(request.dryRun) && request.dryRun
+    message: NL2Infra may only dry-run. Changes reach the cluster through Argo CD.
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: nl2infra-app-dry-run-only
+spec:
+  policyName: nl2infra-app-dry-run-only
+  validationActions: [Deny]
