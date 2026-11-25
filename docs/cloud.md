@@ -42,13 +42,14 @@ agent at a time, so stop any tunnel on your laptop first.
 
 | Credential | Scope | Where |
 |---|---|---|
-| App cluster identity | dry runs and reads in dev, staging, production; the Argo CD applications; exec in the probe pod | `secrets/app.kubeconfig`, readable by UID 10001 |
+| App cluster identity | dry runs and reads in dev, staging, production, default; the Argo CD applications; exec in the probe pod | `secrets/app.kubeconfig`, readable by UID 10001 |
 | Argo CD deploy key | read the manifests repository | `/etc/nl2infra/`, a secret in `argocd` |
 | GitHub token | contents and pull requests on the manifests repository only | `.env`, mode 600 |
 | ngrok authtoken | the tunnel | `/etc/nl2infra/ngrok.yml` |
 
 An admission policy (`infra/cloud/app-access.yaml`) rejects every write from the app's identity
-unless it is a server dry run.
+unless it is a server dry run. A generated resource kind that is not listed there cannot be
+validated with this identity: the dry run reports a tool error and the run escalates.
 
 ## The Deploy stage
 
