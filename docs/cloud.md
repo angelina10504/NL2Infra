@@ -73,8 +73,9 @@ folder, and staging prunes, so the newest merged request is what runs.
 
 ## Switching on real runs
 
-`NL2INFRA_MOCK_MODE=true` (the default) uses the mock model and a mock pull request. Setting it
-to `false` in `.env` makes real model calls and opens real pull requests:
+`NL2INFRA_MOCK_MODE=true` (the default) uses a mock model, mock validation checks and a mock
+pull request. Setting it to `false` in `.env` makes real model calls and opens real pull
+requests:
 
 ```bash
 sudo systemctl restart nl2infra

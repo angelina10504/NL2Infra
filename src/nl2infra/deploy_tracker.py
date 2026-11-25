@@ -335,7 +335,8 @@ def view(run: dict) -> Optional[dict]:
     """What the dashboard should show for a saved or live run."""
     if is_simulated(run.get("pr_url")):
         return {"status": "simulated",
-                "detail": "Simulated run: the pull request is a mock. Nothing was merged or deployed."}
+                "detail": "Simulated run: the model, validation checks and pull request are mocks. "
+                          "Nothing was merged or deployed."}
     return run.get("deploy")
 
 
