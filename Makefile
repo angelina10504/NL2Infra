@@ -72,7 +72,13 @@ check-secrets:
 	  if [ ! -s $$f ]; then echo "missing or empty: $$f (see docs/compose.md, Secrets)" >&2; exit 1; fi; \
 	done
 
-up: check-secrets
+# Distroless trace services use the static HTTP probe from the pinned Prometheus image.
+observability/.local/busybox:
+	@mkdir -p $(@D)
+	@podman run --rm --entrypoint /bin/cat docker.io/prom/prometheus:v3.16.0@sha256:e04987641b57704f408e31f6373ba4138ecf27cb4a165d24aabb6c38fddd0f06 /bin/busybox > $@.tmp
+	@chmod 0555 $@.tmp && mv $@.tmp $@
+
+up: check-secrets observability/.local/busybox
 	podman compose up -d
 
 # The resolved compose config without .env values (plain `podman compose config` prints them).

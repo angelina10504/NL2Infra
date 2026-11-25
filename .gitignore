@@ -43,3 +43,4 @@ test_artifacts/
 
 # Local secret files (compose secrets), never committed
 secrets/
+observability/.local/

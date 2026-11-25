@@ -1,4 +1,6 @@
 import os
+
+import telemetry
 import re
 import sys
 import json
@@ -568,7 +570,18 @@ class Validators:
         def timed(name, func, *args, **kwargs):
             started = time.time()
             try:
-                return func(*args, **kwargs)
+                with telemetry.span("gauntlet." + name) as check:
+                    findings = func(*args, **kwargs)
+                    if check.is_recording():
+                        crashed = is_tool_crash(findings)
+                        check.set_attributes({
+                            "nl2infra.violations.count": len(findings),
+                            "nl2infra.rule_ids": sorted({v.rule_id for v in findings})[:20],
+                            "nl2infra.check.outcome": "crash" if crashed else ("fail" if findings else "pass"),
+                        })
+                        if crashed:
+                            check.set_status(telemetry.StatusCode.ERROR)
+                    return findings
             finally:
                 timings[name] = round(time.time() - started, 3)
 

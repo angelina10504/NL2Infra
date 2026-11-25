@@ -16,3 +16,6 @@ scrape_configs:
     static_configs:
       # The app runs in the same compose network (compose.yaml), reached by service name.
       - targets: ["app:8000"]
+  - job_name: "trace-latency"
+    static_configs:
+      - targets: ["collector:8889"]

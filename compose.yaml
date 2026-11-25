@@ -1,5 +1,4 @@
-# NL2Infra: the whole system on Podman. App + Prometheus + Alertmanager + Grafana.
-# (OTel Collector and Jaeger join in Phase 5.)
+# NL2Infra on Podman with metrics, alerts and distributed tracing.
 #
 #   make image PROVIDER=podman               # builds nl2infra:dev (needs --format docker for HEALTHCHECK)
 #   make kubeconfig-internal PROVIDER=podman # kubeconfig that reaches kind by node name
@@ -30,6 +29,8 @@ services:
     environment:
       # These win over .env: mock mode by default, and the container's own writable paths.
       MOCK_MODE: "${NL2INFRA_MOCK_MODE:-true}"
+      OTEL_SERVICE_NAME: nl2infra
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${NL2INFRA_OTLP_ENDPOINT-http://collector:4318}"
       KUBECONFIG: /kube/config
       NL2INFRA_RUNS_DIR: /app/state/runs
       NL2INFRA_AUTH_DB: /app/state/auth.sqlite3
@@ -48,6 +49,38 @@ services:
       interval: 15s
       timeout: 5s
       start_period: 30s
+      retries: 3
+
+  collector:
+    <<: *hardening
+    user: "10001:10001"
+    mem_limit: 192m
+    cpus: 0.5
+    image: docker.io/otel/opentelemetry-collector-contrib:0.165.0@sha256:e40d61f10c9a617cca1ffd1be4d7e2b3a4b0f0001798ff07e58cabe82e618cea
+    command: ["--config=/etc/otel/config.yaml"]
+    volumes:
+      - ./observability/collector/config.yaml:/etc/otel/config.yaml:ro
+      - ./observability/.local/busybox:/probe/busybox:ro
+    healthcheck:
+      test: ["CMD", "/probe/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:13133/"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  jaeger:
+    <<: *hardening
+    user: "10001:10001"
+    mem_limit: 192m
+    cpus: 0.5
+    image: docker.io/jaegertracing/jaeger:2.17.0@sha256:6266573208d665ce5c17483bce0a75d0806480d92c84766d288d0aee885ce708
+    environment:
+      JAEGER_LISTEN_HOST: 0.0.0.0
+    volumes:
+      - ./observability/.local/busybox:/probe/busybox:ro
+    healthcheck:
+      test: ["CMD", "/probe/busybox", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:16686/api/services"]
+      interval: 15s
+      timeout: 5s
       retries: 3
 
   alertmanager:
@@ -109,6 +142,7 @@ services:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_USERS_DEFAULT_THEME: light
+      GF_PLUGINS_PREINSTALL: jaeger@13.0.8
       GF_LOG_MODE: console          # no log files: the root filesystem is read-only
       GF_ANALYTICS_REPORTING_ENABLED: "false"
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"

@@ -19,6 +19,7 @@ sys.path.append(os.path.abspath(os.path.dirname(__file__)))
 from contracts import RunState, Plan, Resource, Violation
 from guardrails import check_guardrails
 from pipeline import Pipeline
+import telemetry
 import notifications
 from notifications import slack as slack_notifications
 import auth
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="NL2Infra Enterprise Studio", version="1.0.0")
 
+telemetry.instrument_app(app)
 app.include_router(auth.router)
 
 

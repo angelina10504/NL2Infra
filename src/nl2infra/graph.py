@@ -11,6 +11,7 @@ from langgraph.graph import StateGraph, END
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import interrupt
 
+import telemetry
 import metrics as _metrics
 from contracts import RunState, Violation, CLUSTER_SCOPED_KINDS
 from guardrails import check_guardrails, RateLimiter
@@ -66,8 +67,19 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
         """Runs func(state), which mutates state, and returns the whole state as the update."""
         def wrapped(state: RunState):
             try:
-                with track_time(state.metrics, timer_key):
-                    func(state)
+                with telemetry.span("stage." + timer_key.removesuffix("_time")) as stage:
+                    try:
+                        with track_time(state.metrics, timer_key):
+                            func(state)
+                    except GraphBubbleUp:
+                        stage.set_attribute("nl2infra.outcome", "awaiting_approval")
+                        raise
+                    except Exception:
+                        stage.set_attribute("nl2infra.outcome", "escalated")
+                        raise
+                    stage.set_attribute("nl2infra.outcome", state.status if state.status != "running" else "completed")
+                    if state.status == "escalated":
+                        stage.set_status(telemetry.StatusCode.ERROR)
             except GraphBubbleUp:
                 raise  # the approval pause, not an error
             except LLMError as error:
@@ -174,12 +186,15 @@ def create_graph(llm=None, validator=None, gitops=None, auto_approve: bool = Fal
     def fix(state: RunState):
         previous = state.rounds[-2] if len(state.rounds) >= 2 else None
         state.iterations += 1
-        state.files = llm.fix(
-            state.files, state.violations, plan=state.approved_plan,
-            previous_files=previous["files"] if previous else None,
-            previous_violations=[Violation(**v) for v in previous["violations"]] if previous else None,
-            round_number=state.iterations,
-        )
+        with telemetry.span("fix.round", attributes={
+            "nl2infra.fix.round": state.iterations, "nl2infra.violations.count": len(state.violations),
+        }):
+            state.files = llm.fix(
+                state.files, state.violations, plan=state.approved_plan,
+                previous_files=previous["files"] if previous else None,
+                previous_violations=[Violation(**v) for v in previous["violations"]] if previous else None,
+                round_number=state.iterations,
+            )
 
     def pull_request(state: RunState):
         namespaces = Counter(

@@ -17,3 +17,4 @@ test_artifacts/
 .ruff_cache
 **/.DS_Store
 secrets/
+observability/.local/

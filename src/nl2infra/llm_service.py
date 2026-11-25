@@ -4,6 +4,8 @@ The model has no tools: every call sends text and reads text back. Nothing here
 binds tools or uses provider-side structured output.
 """
 import os
+
+import telemetry
 import re
 import json
 import time
@@ -229,9 +231,16 @@ class LLMService:
 
     def _call(self, prompt: str, stage: str, **context) -> str:
         """One text-in, text-out call with timeout, backoff and rate-limit handling. Every attempt is logged."""
+        with telemetry.span("llm.call", attributes={
+            "gen_ai.operation.name": stage, "gen_ai.request.model": self.model_name,
+        }) as call_span:
+            return self._attempt_call(prompt, stage, call_span, context)
+
+    def _attempt_call(self, prompt, stage, call_span, context):
         retries = 0
         rate_limit_waits = 0
         while True:
+            call_span.set_attribute("nl2infra.llm.attempts", 1 + retries + rate_limit_waits)
             started = time.time()
             record = {"stage": stage, **context, "model": self.model_name, "tokens_in": None, "tokens_out": None}
             try:
@@ -246,7 +255,10 @@ class LLMService:
                     rate_limit_waits += 1
                     record["waited_seconds"] = wait
                     logger.warning("Rate limited (HTTP 429); waiting %.1f s", wait)
-                    self.sleep(wait)
+                    with telemetry.span("llm.rate_limit_wait", attributes={
+                        "nl2infra.wait.seconds": wait, "nl2infra.llm.attempt": retries + rate_limit_waits,
+                    }):
+                        self.sleep(wait)
                     continue
                 if kind == "retryable" and retries < len(BACKOFF_SECONDS):
                     wait = BACKOFF_SECONDS[retries]
@@ -257,6 +269,10 @@ class LLMService:
                 raise LLMUnavailable(f"{stage}: {type(error).__name__}: {str(error)[:200]}") from error
 
             tokens_in, tokens_out = _usage(response)
+            if tokens_in is not None:
+                call_span.set_attribute("gen_ai.usage.input_tokens", tokens_in)
+            if tokens_out is not None:
+                call_span.set_attribute("gen_ai.usage.output_tokens", tokens_out)
             record.update(ok=True, seconds=round(time.time() - started, 3), tokens_in=tokens_in, tokens_out=tokens_out)
             self.call_log.append(record)
             return _text(response)
@@ -374,6 +390,7 @@ class LLMService:
         names = plan_filenames(plan)
         resource_for_file = {names[f"{r.type}/{r.name}"]: r for r in plan.resources}
         failing = violations_by_file(files, violations, plan)
+        telemetry.trace.get_current_span().set_attribute("nl2infra.fix.files", len(failing))
         earlier = violations_by_file(previous_files or {}, previous_violations or [], plan) if previous_files else {}
 
         updated = dict(files)

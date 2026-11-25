@@ -1,0 +1,43 @@
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 140
+    spike_limit_mib: 30
+  batch:
+    timeout: 1s
+
+connectors:
+  span_metrics:
+    namespace: nl2infra.trace
+    histogram:
+      unit: s
+      explicit:
+        buckets: [1ms, 5ms, 10ms, 50ms, 100ms, 500ms, 1s, 5s, 15s, 60s, 180s]
+    metrics_flush_interval: 5s
+
+exporters:
+  otlp_http/jaeger:
+    endpoint: http://jaeger:4318
+  prometheus:
+    endpoint: 0.0.0.0:8889
+
+service:
+  extensions: [health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlp_http/jaeger, span_metrics]
+    metrics:
+      receivers: [span_metrics]
+      exporters: [prometheus]

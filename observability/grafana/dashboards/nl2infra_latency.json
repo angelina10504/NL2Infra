@@ -1,0 +1,68 @@
+{
+  "uid": "nl2infra-latency",
+  "title": "NL2Infra Trace Latency",
+  "schemaVersion": 39,
+  "refresh": "5s",
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Pipeline stage mean duration since collector startup",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (span_name) (nl2infra_trace_duration_seconds_sum{service_name=\"nl2infra\",span_name=~\"nl2infra[.]stage[.].+\"}) / sum by (span_name) (nl2infra_trace_duration_seconds_count{service_name=\"nl2infra\",span_name=~\"nl2infra[.]stage[.].+\"})",
+          "legendFormat": "{{span_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Gauntlet checker mean duration since collector startup",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 9,
+        "w": 24,
+        "h": 9
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (span_name) (nl2infra_trace_duration_seconds_sum{service_name=\"nl2infra\",span_name=~\"nl2infra[.]gauntlet[.].+\"}) / sum by (span_name) (nl2infra_trace_duration_seconds_count{service_name=\"nl2infra\",span_name=~\"nl2infra[.]gauntlet[.].+\"})",
+          "legendFormat": "{{span_name}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      }
+    }
+  ]
+}

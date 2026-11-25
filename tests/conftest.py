@@ -15,6 +15,8 @@ for p in [root_dir, src_dir]:
 @pytest.fixture(autouse=True)
 def _isolate_events(tmp_path, monkeypatch):
     """Point the notifications store at a per-test file so emits never pollute a shared log."""
+    # GitOps fallback tests must stay local even when the project .env contains a token.
+    monkeypatch.setenv("GITHUB_TOKEN", "")
     monkeypatch.setenv("NL2INFRA_EVENTS_FILE", str(tmp_path / "events.jsonl"))
     monkeypatch.delenv("SLACK_WEBHOOK_URL", raising=False)
     monkeypatch.setenv("NL2INFRA_AUTH_DB", str(tmp_path / "auth.sqlite3"))

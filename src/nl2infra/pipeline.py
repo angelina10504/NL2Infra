@@ -17,6 +17,7 @@ from langgraph.checkpoint.serde.jsonplus import JsonPlusSerializer
 from langgraph.types import Command
 
 import metrics as _metrics
+import telemetry
 from contracts import Plan, RunState
 from graph import create_graph, default_services
 from guardrails import detect_environment
@@ -34,6 +35,8 @@ class Pipeline:
             validator = validator or default_validator
             gitops = gitops or default_gitops
         self.llm, self.validator, self.gitops = llm, validator, gitops
+        telemetry.init_tracing()
+        self._approval_spans = {}
         self.run_dir = run_dir
         self._pending_approval: set = set()  # request_ids counted in the pending_approvals gauge
         self.graph = create_graph(
@@ -128,10 +131,33 @@ class Pipeline:
             project_aware=project_aware,
             pasted_files=pasted_files or {},
         )
-        return self._drive(state.request_id, state, on_step)
+        return self._traced_drive(state, state, on_step)
 
     def resume(self, request_id: str, approved: bool, on_step: StepCallback = None) -> RunState:
         """Continues a run that is waiting at the approval step."""
         if not self.awaiting_approval(request_id):
             raise ValueError(f"run {request_id} is not waiting for approval")
-        return self._drive(request_id, Command(resume={"approved": bool(approved)}), on_step)
+        return self._traced_drive(self.state(request_id), Command(resume={"approved": bool(approved)}), on_step)
+
+    def _traced_drive(self, state, graph_input, on_step):
+        request_id = state.request_id
+        previous = self._approval_spans.pop(request_id, None)
+        with telemetry.span("run", root=True, previous=previous) as run:
+            result = self._drive(request_id, graph_input, on_step)
+            if run.is_recording():
+                paused = result.status == "running" and self.awaiting_approval(request_id)
+                attrs = {
+                    "nl2infra.request_id": request_id, "nl2infra.role": result.user_role,
+                    "nl2infra.namespace": detect_environment(result.user_prompt),
+                    "nl2infra.outcome": "awaiting_approval" if paused else result.status,
+                }
+                if result.arm:
+                    attrs["nl2infra.arm"] = result.arm
+                if result.profile:
+                    attrs["nl2infra.workload_type"] = result.profile.workload_type.value
+                run.set_attributes(attrs)
+                if result.status == "escalated":
+                    run.set_status(telemetry.StatusCode.ERROR)
+                if paused:
+                    self._approval_spans[request_id] = run.get_span_context()
+            return result

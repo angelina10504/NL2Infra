@@ -71,16 +71,19 @@ All 60 recorded benchmark runs used `openai/gpt-oss-120b`.
 | `policies/` | Rego packs + `checkov.yaml` (two Checkov rules skipped, with reasons) |
 | `benchmarks/`, `eval/` | Benchmark runner, datasets, evaluation and charts |
 | `observability/` | Prometheus, Alertmanager, Grafana configs and dashboard |
-| `docker-compose.observability.yml` | Old monitoring stack (Docker, app on host) — replaced in Phase 3 |
+| `compose.yaml` | The whole stack on Podman: app, Prometheus, Alertmanager, Grafana (Phase 3) |
+| `infra/legacy/docker-compose.observability.yml` | Old Docker-only monitoring stack, kept for reference |
+| `secrets/` (gitignored) | `alert_webhook_token`, `grafana_admin_password` — file secrets, never printed |
 | `Containerfile`, `.containerignore` | App image: non-root UID 10001, baseline tool versions (Phase 2) |
-| `docs/podman.md`, `docs/container.md` | How kind runs on Podman; how the image is built and run |
+| `docs/podman.md`, `docs/container.md`, `docs/compose.md` | kind on Podman; the image; the compose stack |
 | `infra/kind-config.yaml`, `infra/argocd/` | Local cluster config; ArgoCD apps (never applied) |
-| `tests/` | 24 test files, 426 tests; full suite must stay green |
+| `tests/` | 25 test files, 437 tests; full suite must stay green |
 | `.github/workflows/ci.yml` | CI workflow — exists locally, but `.github/workflows/` is gitignored |
 
 Run on the host: `make run` (uvicorn on :8000), `make streamlit`, `make test`.
 Run in a container: `make image PROVIDER=podman`, `make image-test PROVIDER=podman`,
 `make image-run PROVIDER=podman`.
+Whole stack: `make up` / `make down` / `make ps` / `make logs` / `make config` (hides `.env` values).
 
 ---
 
@@ -92,24 +95,26 @@ Run in a container: `make image PROVIDER=podman`, `make image-test PROVIDER=podm
 | Benchmark arms A/B/C | **Run** — 20 requests (easy + medium), 1 repeat |
 | Arm D (RAG), fit benchmark, hard tier | Code exists, **not run** |
 | Pull requests, Slack approval, team access | Built |
-| Prometheus / Grafana / Alertmanager | Built, runs under Docker, app runs on the host |
+| Prometheus / Grafana / Alertmanager | Run in compose on Podman; alert path verified end to end (webhook uses a bearer token) |
 | ArgoCD deploy | Configs only, never applied |
-| **Podman** | kind on Podman (Phase 1); app image builds and passes 426 tests inside (Phase 2); compose stack not yet |
-| **OpenTelemetry** | **Not started** |
+| **Podman** | Done: kind on Podman, app image, and the full compose stack (`make up`), all hardened |
+| **OpenTelemetry** | **Host and image suites passed (442 tests each). Verified live OTLP export, Jaeger queries through Grafana, and four checker latency series in Prometheus. Authenticated mock UI run verified through Grafana: planning and generation shared the request ID, generation linked to planning, and the stage panel returned nine series. REQUIRED for the final evaluation — never defer it to "future work"** |
 
 **Recorded benchmark result — do not disturb it.** Final pass rate A 0/20, B 2/20, C 19/20;
 all-checks-pass 0 / 0 / 19. Anything you change must leave the benchmark reproducible.
 
-**Baseline (Phase 2, commit `ba53d23`):** 426 tests pass on the host and inside the container
+**Baseline (Phase 3, commit `f33d7dd`):** 437 tests pass on the host and inside the container
 (36 against the real cluster), Rego 46/46. Python 3.12.13, Checkov 3.3.26, Conftest 0.69.0
 with embedded OPA 1.19.0 (Homebrew's 0.69.0 reports `dev`; same release), kubectl/cluster
 v1.37.0, kind v0.33.0. These match all 60 recorded benchmark runs and must stay the same.
 Exact Python pins are in `requirements.lock`.
 
 **Runtime now:** Podman 6.2.0, rootful machine `podman-machine-default` (4 CPU, 4096 MB,
-libkrun). kind cluster `nl2infra` (node image pinned by digest) runs on Podman. Docker Desktop
-is quit but its disk (~8.6 GB) is kept as the fallback until Phase 3 works. `podman compose`
-uses the external `docker-compose` v5.5.0. App image `nl2infra:dev` ≈ 1.06 GB, ~80 MB RAM idle.
+libkrun). kind cluster `nl2infra` (node image pinned by digest) runs on Podman. `make up` runs
+the stack: app 1 GiB/1 CPU, Prometheus v3.16.0, Alertmanager v0.35.0, Grafana 13.3.1 (each
+pinned by digest, non-root, caps dropped, read-only root, ports on 127.0.0.1). Idle memory with
+kind ≈ 1.1 GB of 4 GB. Docker Desktop is quit; its data (~8.6 GB, includes other projects'
+volumes) is kept. `podman compose` uses the external `docker-compose` v5.5.0.
 
 **Containers keep their own run history.** Inside the container `NL2INFRA_RUNS_DIR` points at a
 named volume; the host's `runs/benchmark` and `runs/pilot` are mounted read-only and are never
@@ -138,6 +143,10 @@ Two things, in this order:
 - OTel Collector receives OTLP, sends traces to Jaeger, and derives per-stage latency metrics
   (span metrics) into Prometheus so Grafana can chart them.
 - Grafana gets a Jaeger datasource and latency panels, so monitoring is one screen.
+
+**Both A and B are required deliverables for the final evaluation.** Neither may be moved to
+"future work", dropped, or reduced to docs only. If something blocks them, stop and report the
+blocker with options that still deliver them.
 
 **Why:** examiner feedback asked for Podman, live monitoring, and "work on the latency part".
 A trace waterfall shows exactly where a request's time goes: model calls vs checkers vs
@@ -195,6 +204,11 @@ rate-limit waits.
   `podman machine ssh -- sudo fstrim -av` to give free space back to macOS.
 - **Build with `--format docker`.** Podman's default OCI format drops `HEALTHCHECK`.
 - **kind picks Docker when the docker CLI exists.** Always pass `PROVIDER=podman`.
+- **`env_file: .env` exposes the app's keys** to `podman compose config` and `podman inspect`.
+  Use `make config`. Never print either output whole.
+- **Most app routes need a GitHub sign-in.** Don't work around auth to test something; ask the
+  team to sign in in a browser.
+- **Check `MOCK_MODE` inside the container before any run.** `.env` overrides the image default.
 - **The laptop sleeping kills Docker/Podman VMs.** Long runs go under `caffeinate -i`.
 
 ---
