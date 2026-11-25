@@ -1,0 +1,19 @@
+[Unit]
+Description=NL2Infra public HTTPS tunnel (ngrok)
+Wants=network-online.target
+After=network-online.target nl2infra.service
+
+[Service]
+User=nl2infra-ngrok
+EnvironmentFile=/etc/nl2infra/ngrok.env
+ExecStart=/usr/local/bin/ngrok http 8000 --url ${NGROK_URL} --traffic-policy-file /opt/nl2infra/infra/ngrok-team-policy.json --inspect=false --config /etc/nl2infra/ngrok.yml --log stdout --log-level warn
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

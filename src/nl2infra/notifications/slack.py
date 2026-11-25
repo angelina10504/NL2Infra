@@ -279,7 +279,8 @@ def _apply_decision(request_id: str, requested_outcome: str, github_id: str, act
             return
 
         final_violations = ((run.get("rounds") or [{}])[-1]).get("violations", run.get("violations", []))
-        if run.get("status") != "passed" or final_violations:
+        import deploy_tracker
+        if run.get("status") != "passed" or final_violations or deploy_tracker.is_simulated(run.get("pr_url")):
             _update_original(response_url, "failed", actor)
             return
 

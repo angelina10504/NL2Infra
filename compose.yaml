@@ -36,6 +36,8 @@ services:
       NL2INFRA_AUTH_DB: /app/state/auth.sqlite3
       NL2INFRA_EVENTS_FILE: /app/state/events.jsonl
       NL2INFRA_ALERT_WEBHOOK_TOKEN_FILE: /run/secrets/alert_webhook_token
+      # Deploy stage: follow real pull requests to their rollout (off unless switched on).
+      NL2INFRA_DEPLOY_OBSERVER: "${NL2INFRA_DEPLOY_OBSERVER:-false}"
     secrets: [alert_webhook_token]
     volumes:
       - ${NL2INFRA_KUBECONFIG:-${HOME}/.kube/nl2infra-internal.config}:/kube/config:ro
